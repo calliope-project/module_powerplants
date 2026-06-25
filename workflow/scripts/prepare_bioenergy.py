@@ -38,7 +38,7 @@ def main():
         mapping=fuel_settings["mapping"],
         ignored=fuel_settings["ignored"],
         default="bioenergy: unknown",
-        class_prefix="b"
+        class_prefix="b",
     )
     _schemas.FuelSchema.validate(fuels_df).to_parquet(snakemake.output.fuels)
 

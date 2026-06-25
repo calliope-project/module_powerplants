@@ -90,6 +90,7 @@ def get_files_to_remap(category: str, prefix: str):
 
     return to_combine
 
+
 def get_fuel_settings() -> dict:
     """Standardised access to fuel configuration."""
     combined = internal["fuels"]

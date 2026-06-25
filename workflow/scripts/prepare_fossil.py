@@ -87,7 +87,7 @@ def prepare_gem_gcpt(
         mapping=fuel_settings["mapping"],
         ignored=fuel_settings["ignored"],
         default="coal: unknown",
-        class_prefix="c"
+        class_prefix="c",
     )
 
     coal_df = gpd.GeoDataFrame(
