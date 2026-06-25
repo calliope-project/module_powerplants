@@ -196,6 +196,7 @@ properties:
               - type: object
                 propertyNames:
                   enum:
+                    - "advanced boiling water reactor"
                     - "boiling water reactor"
                     - "fast breeder reactor"
                     - "fast neutron reactor"
@@ -203,18 +204,19 @@ properties:
                     - "heavy water gas-cooled reactor"
                     - "heavy water light water reactor"
                     - "high temperature gas reactor"
-                    - "liquid-metal-cooled fast reactor"
                     - "light water graphite reactor"
+                    - "liquid-metal-cooled fast reactor"
+                    - "microreactor"
                     - "molten salt reactor"
                     - "pressurized heavy water reactor"
                     - "pressurized water reactor"
                     - "small modular reactor"
                     - "steam-generating heavy water reactor"
-                    - unknown
+                    - "unknown"
                 additionalProperties:
                   $ref: "#/$defs/non_empty_string"
-                minProperties: 15
-                maxProperties: 15
+                minProperties: 17
+                maxProperties: 17
         required:
           - technology_mapping
 

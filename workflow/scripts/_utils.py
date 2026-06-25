@@ -9,7 +9,7 @@ from pyproj import CRS
 
 # Average year where powerplant datasets were last updated.
 # MUST BE ADJUSTED WHENEVER DATASOURCES ARE UPDATED!
-DATASET_YEAR = 2023
+DATASET_YEAR = 2024
 
 
 def check_crs(

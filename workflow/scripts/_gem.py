@@ -7,7 +7,7 @@ import pandas as pd
 
 GEM_GWPT_SHEETS = ["Data", "Below Threshold"]
 
-GEM_GSPT_SHEETS = ["20 MW+", "1-20 MW"]
+GEM_GSPT_SHEETS = ["Utility-Scale (1 MW+)", "Distributed (<1 MW)"]
 GSPT_CAPACITY_RATING_MAPPING = {"MWac": "AC", "MWp/dc": "DC"}
 
 _INVALID_STATUS_VALUES = ["cancelled", "shelved"]

@@ -76,7 +76,7 @@ def proxy_rooftop_pv_capacity(
     borders_df["output_capacity_mw"] = missing_cap_mw
 
     proxy = gregor.disaggregate.disaggregate_polygon_to_raster(
-        borders_df, column="output_capacity_mw", proxy=area_potential_da, use_dask=True
+        borders_df, column="output_capacity_mw", proxy=area_potential_da.chunk("auto"),
     )
     proxy.attrs |= {
         "name": "output_capacity_mw",

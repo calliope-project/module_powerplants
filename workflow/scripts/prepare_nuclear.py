@@ -21,7 +21,6 @@ def main(
 ):
     """Obtain nuclear power plants using GEM-GNPT data."""
     raw_df = gem.read_gem_dataset(gem_gnpt_path, ["Data"])
-
     nuclear_df = gpd.GeoDataFrame(
         {
             "powerplant_id": _utils.get_combined_text_col(
