@@ -96,7 +96,7 @@ rule prepare_bioenergy:
         "../envs/powerplants.yaml"
     params:
         geo_crs=internal["crs"]["geographic"],
-        fuel_mapping=internal["fuel_mapping"] | config["fuel_mapping"],
+        fuel_settings=get_fuel_settings(),
         technology_mapping=config["category"]["bioenergy"]["technology_mapping"],
     message:
         "Preparing bioenergy powerplants using the Global Bioenergy Power Tracker (GBPT) dataset."
@@ -119,7 +119,7 @@ rule prepare_fossil:
         "../envs/powerplants.yaml"
     params:
         geo_crs=internal["crs"]["geographic"],
-        fuel_mapping=internal["fuel_mapping"] | config["fuel_mapping"],
+        fuel_settings=get_fuel_settings(),
         technology_mapping=config["category"]["fossil"]["technology_mapping"],
     message:
         "Preparing fossil powerplants using the GOGPT and GCPT datasets."

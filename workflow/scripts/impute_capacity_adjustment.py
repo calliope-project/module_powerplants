@@ -69,7 +69,7 @@ def adjust_powerplant_capacity(
 
 
 if __name__ == "__main__":
-    sys.stderr = open(snakemake.log[0], "w")
+    sys.stderr = open(snakemake.log[0], "w", buffering=1)
     adjust_powerplant_capacity(
         stats_file=snakemake.input.stats,
         unadjusted_file=snakemake.input.unadjusted,

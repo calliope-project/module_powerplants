@@ -6,63 +6,69 @@ crs:
 resources:
   automatic:
     # Links for automatically downloaded files
-    EIA: "https://zenodo.org/records/16779120/files/EIA-INTL.txt"
+    EIA: "https://zenodo.org/records/20843067/files/EIA-INTL.txt"
     GEM:
-      GBPT: https://zenodo.org/records/16779120/files/GEM_GBPT.xlsx
-      GCPT: https://zenodo.org/records/16779120/files/GEM_GCPT.xlsx
-      GGPT: https://zenodo.org/records/16779120/files/GEM_GGPT.xlsx
-      GNPT: https://zenodo.org/records/16779120/files/GEM_GNPT.xlsx
-      GOGPT: https://zenodo.org/records/16779120/files/GEM_GOGPT.xlsx
-      GSPT: https://zenodo.org/records/16779120/files/GEM_GSPT.xlsx
-      GWPT: https://zenodo.org/records/16779120/files/GEM_GWPT.xlsx
+      GBPT: https://zenodo.org/records/20843067/files/GEM_GBPT.xlsx
+      GCPT: https://zenodo.org/records/20843067/files/GEM_GCPT.xlsx
+      GGPT: https://zenodo.org/records/20843067/files/GEM_GGPT.xlsx
+      GNPT: https://zenodo.org/records/20843067/files/GEM_GNPT.xlsx
+      GOGPT: https://zenodo.org/records/20843067/files/GEM_GOGPT.xlsx
+      GSPT: https://zenodo.org/records/20843067/files/GEM_GSPT.xlsx
+      GWPT: https://zenodo.org/records/20843067/files/GEM_GWPT.xlsx
     GloHydroRes: "https://zenodo.org/records/14526360/files/GloHydroRes_vs1.csv"
-    TZ-SAM: https://zenodo.org/records/16779120/files/TZ-SAM.gpkg
-fuel_mapping:
-  "bioenergy: agricultural waste (biogas)": "biogas"
-  "bioenergy: agricultural waste (solids)": "biomass"
-  "bioenergy: agricultural waste (syngas)": "syngas"
-  "bioenergy: agricultural waste (unknown)": "biomass"
-  "bioenergy: biodiesel": "diesel"
-  "bioenergy: ethanol": "ethanol"
-  "bioenergy: paper mill wastes": "biomass"
-  "bioenergy: refuse (landfill gas)": "biogas"
-  "bioenergy: refuse (municipal and industrial wastes)": "solid waste"
-  "bioenergy: refuse (syngas)": "syngas"
-  "bioenergy: unknown": "biomass"
-  "bioenergy: wastewater and sewage sludge (solids or biogas)": "biomass"
-  "bioenergy: wood & other biomass (biocoal)": "biomass"
-  "bioenergy: wood & other biomass (solids)": "biomass"
-  "bioenergy: wood & other biomass (syngas)": "syngas"
-  "coal: anthracite": "hard coal"
-  "coal: bituminous": "hard coal"
-  "coal: lignite": "brown coal"
-  "coal: subbituminous": "brown coal"
-  "coal: unknown": "brown coal"
-  "coal: waste coal": "brown coal"
-  "fossil gas: coalbed methane": "natural gas"
-  "fossil gas: gaseous propane": "oil"
-  "fossil gas: LNG": "natural gas"
-  "fossil gas: natural gas": "natural gas"
-  "fossil gas: unknown": "natural gas"
-  "fossil gas: waste heat from natural gas": "waste heat"
-  "fossil liquids: crude oil": "oil"
-  "fossil liquids: diesel": "diesel"
-  "fossil liquids: fuel oil": "oil"
-  "fossil liquids: gasoline": "gasoline"
-  "fossil liquids: heavy fuel oil": "oil"
-  "fossil liquids: jet fuel": "oil"
-  "fossil liquids: kerosene": "oil"
-  "fossil liquids: light fuel oil": "oil"
-  "fossil liquids: liquefied petroleum gas": "oil"
-  "fossil liquids: naphtha": "oil"
-  "fossil liquids: petroleum coke": "oil"
-  "fossil liquids: unknown": "oil"
-  "fossil liquids: waste/other oil": "oil"
-  "industrial by-product:": "solid waste"
-  "industrial by-product: blast furnace gas": "waste heat"
-  "industrial by-product: coke oven gas": "waste heat"
-  "industrial by-product: unknown": "solid waste"
-  "other: hydrogen (blue)": "hydrogen"
-  "other: hydrogen (green)": "hydrogen"
-  "other: hydrogen (unknown)": "hydrogen"
-  "other: tires": "solid waste"
+    TZ-SAM: https://zenodo.org/records/20843067/files/TZ-SAM.gpkg
+fuels:
+  mapping:
+    "bioenergy: agricultural waste (biogas)": "biogas"
+    "bioenergy: agricultural waste (solids)": "biomass"
+    "bioenergy: agricultural waste (syngas)": "syngas"
+    "bioenergy: agricultural waste (unknown)": "biomass"
+    "bioenergy: biodiesel": "diesel"
+    "bioenergy: bio-heavy oil": "oil"
+    "bioenergy: ethanol": "ethanol"
+    "bioenergy: paper mill wastes": "biomass"
+    "bioenergy: refuse (landfill gas)": "biogas"
+    "bioenergy: refuse (municipal and industrial wastes)": "solid waste"
+    "bioenergy: refuse (syngas)": "syngas"
+    "bioenergy: unknown": "biomass"
+    "bioenergy: wastewater and sewage sludge (solids or biogas)": "biogas"
+    "bioenergy: wood & other biomass (biocoal)": "biomass"
+    "bioenergy: wood & other biomass (solids)": "biomass"
+    "bioenergy: wood & other biomass (syngas)": "syngas"
+    "coal: anthracite": "hard coal"
+    "coal: bituminous": "hard coal"
+    "coal: lignite": "brown coal"
+    "coal: subbituminous": "brown coal"
+    "coal: unknown": "brown coal"
+    "coal: waste coal": "brown coal"
+    "fossil gas: coalbed methane": "natural gas"
+    "fossil gas: gaseous propane": "oil"
+    "fossil gas: LNG": "natural gas"
+    "fossil gas: natural gas": "natural gas"
+    "fossil gas: unknown": "natural gas"
+    "fossil gas: waste heat from natural gas": "waste heat"
+    "fossil liquids: crude oil": "oil"
+    "fossil liquids: diesel": "diesel"
+    "fossil liquids: fuel oil": "oil"
+    "fossil liquids: gasoline": "gasoline"
+    "fossil liquids: heavy fuel oil": "oil"
+    "fossil liquids: jet fuel": "oil"
+    "fossil liquids: kerosene": "oil"
+    "fossil liquids: light fuel oil": "oil"
+    "fossil liquids: liquefied petroleum gas": "oil"
+    "fossil liquids: naphtha": "oil"
+    "fossil liquids: petroleum coke": "oil"
+    "fossil liquids: unknown": "oil"
+    "fossil liquids: waste/other oil": "oil"
+    "industrial by-product:": "solid waste"
+    "industrial by-product: blast furnace gas": "waste heat"
+    "industrial by-product: coke oven gas": "waste heat"
+    "industrial by-product: unknown": "solid waste"
+    "other: hydrogen (blue)": "hydrogen"
+    "other: hydrogen (green)": "hydrogen"
+    "other: hydrogen (gray)": "hydrogen"
+    "other: hydrogen (unknown)": "hydrogen"
+    "other: tires": "solid waste"
+  ignored:
+    # GEM sometimes includes irrelevant non-fuel categories.
+    - "other: solar thermal"

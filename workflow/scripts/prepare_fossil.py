@@ -75,7 +75,7 @@ def _get_end_year(
 def prepare_gem_gcpt(
     gem_gcpt_path: str,
     technology_mapping: dict[str, str],
-    fuel_mapping: dict[str, str],
+    fuel_settings: dict,
     crs: str,
 ) -> tuple[gpd.GeoDataFrame, pd.DataFrame]:
     """Obtain coal power locations using GEM-GCPT data."""
@@ -83,7 +83,11 @@ def prepare_gem_gcpt(
 
     # Create fuel lookups
     fuels_df, fuel_class = gem.get_unique_fuel_dataset(
-        _get_coal_fuel(raw_df), fuel_mapping, "coal: unknown", "c"
+        raw_fuels=_get_coal_fuel(raw_df),
+        mapping=fuel_settings["mapping"],
+        ignored=fuel_settings["ignored"],
+        default="coal: unknown",
+        class_prefix="c"
     )
 
     coal_df = gpd.GeoDataFrame(
@@ -115,7 +119,7 @@ def prepare_gem_gcpt(
 def prepare_gem_gogpt(
     gem_gogpt_path: str,
     technology_mapping: dict[str, str],
-    fuel_mapping: dict[str, str],
+    fuel_settings: dict,
     crs: str,
 ) -> tuple[gpd.GeoDataFrame, pd.DataFrame]:
     """Obtain oil and gas power plants using GEM-GOGPT data."""
@@ -124,7 +128,11 @@ def prepare_gem_gogpt(
     )
 
     fuels_df, fuel_class = gem.get_unique_fuel_dataset(
-        raw_df["fuel"], fuel_mapping, "fossil gas: unknown", "og"
+        raw_fuels=raw_df["fuel"],
+        mapping=fuel_settings["mapping"],
+        ignored=fuel_settings["ignored"],
+        default="fossil gas: unknown",
+        class_prefix="og",
     )
 
     oil_gas_df = gpd.GeoDataFrame(
@@ -159,7 +167,7 @@ def main() -> None:
     og_plants, og_fuels = prepare_gem_gogpt(
         gem_gogpt_path=snakemake.input.gem_gogpt,
         technology_mapping=snakemake.params.technology_mapping["oil_gas"],
-        fuel_mapping=snakemake.params.fuel_mapping,
+        fuel_settings=snakemake.params.fuel_settings,
         crs=snakemake.params.geo_crs,
     )
     og_plants.to_parquet(snakemake.output.og_plants)
@@ -169,7 +177,7 @@ def main() -> None:
     coal_plants, coal_fuels = prepare_gem_gcpt(
         gem_gcpt_path=snakemake.input.gem_gcpt,
         technology_mapping=snakemake.params.technology_mapping["coal"],
-        fuel_mapping=snakemake.params.fuel_mapping,
+        fuel_settings=snakemake.params.fuel_settings,
         crs=snakemake.params.geo_crs,
     )
     coal_plants.to_parquet(snakemake.output.coal_plants)
@@ -177,5 +185,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    sys.stderr = open(snakemake.log[0], "w")
+    sys.stderr = open(snakemake.log[0], "w", buffering=1)
     main()

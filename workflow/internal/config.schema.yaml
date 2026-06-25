@@ -24,7 +24,7 @@ $defs:
   year_map:
     type: object
     propertyNames:
-      $ref: '#/$defs/non_empty_string'
+      $ref: "#/$defs/non_empty_string"
     additionalProperties:
       type: integer
       minimum: 1
@@ -46,7 +46,7 @@ properties:
         pattern: '^(epsg|EPSG):\d{4,5}$'
     required:
       - projected
-    additionalProperties: false  # Ensures no extra properties in "crs"
+    additionalProperties: false # Ensures no extra properties in "crs"
 
   category:
     title: Category
@@ -54,22 +54,21 @@ properties:
     type: object
     additionalProperties: false
     properties:
-
       bioenergy:
         title: Bioenergy and Waste powerplant settings.
         type: object
         additionalProperties: false
         properties:
           excluded_ids:
-            $ref: '#/$defs/excluded_ids'
+            $ref: "#/$defs/excluded_ids"
           technology_mapping:
             allOf:
-              - $ref: '#/$defs/technology_mapping_base'
+              - $ref: "#/$defs/technology_mapping_base"
               - type: object
                 propertyNames:
                   enum: [unknown]
                 additionalProperties:
-                  $ref: '#/$defs/non_empty_string'
+                  $ref: "#/$defs/non_empty_string"
                 minProperties: 1
                 maxProperties: 1
         required:
@@ -81,16 +80,16 @@ properties:
         additionalProperties: false
         properties:
           excluded_ids:
-            $ref: '#/$defs/excluded_ids'
+            $ref: "#/$defs/excluded_ids"
           technology_mapping:
             allOf:
-              - $ref: '#/$defs/technology_mapping_base'
+              - $ref: "#/$defs/technology_mapping_base"
               - type: object
                 additionalProperties: false
                 properties:
                   coal:
                     allOf:
-                      - $ref: '#/$defs/technology_mapping_base'
+                      - $ref: "#/$defs/technology_mapping_base"
                       - type: object
                         propertyNames:
                           enum:
@@ -101,12 +100,12 @@ properties:
                             - ultra-supercritical
                             - unknown
                         additionalProperties:
-                          $ref: '#/$defs/non_empty_string'
+                          $ref: "#/$defs/non_empty_string"
                         minProperties: 6
                         maxProperties: 6
                   oil_gas:
                     allOf:
-                      - $ref: '#/$defs/technology_mapping_base'
+                      - $ref: "#/$defs/technology_mapping_base"
                       - type: object
                         propertyNames:
                           enum:
@@ -120,7 +119,7 @@ properties:
                             - "steam turbine"
                             - unknown
                         additionalProperties:
-                          $ref: '#/$defs/non_empty_string'
+                          $ref: "#/$defs/non_empty_string"
                         minProperties: 9
                         maxProperties: 9
                 required:
@@ -135,10 +134,10 @@ properties:
         additionalProperties: false
         properties:
           excluded_ids:
-            $ref: '#/$defs/excluded_ids'
+            $ref: "#/$defs/excluded_ids"
           technology_mapping:
             allOf:
-              - $ref: '#/$defs/technology_mapping_base'
+              - $ref: "#/$defs/technology_mapping_base"
               - type: object
                 propertyNames:
                   enum:
@@ -153,7 +152,7 @@ properties:
                     - "geopressured geothermal system (GGS)"
                     - unknown
                 additionalProperties:
-                  $ref: '#/$defs/non_empty_string'
+                  $ref: "#/$defs/non_empty_string"
                 minProperties: 10
                 maxProperties: 10
         required:
@@ -165,10 +164,10 @@ properties:
         additionalProperties: false
         properties:
           excluded_ids:
-            $ref: '#/$defs/excluded_ids'
+            $ref: "#/$defs/excluded_ids"
           technology_mapping:
             allOf:
-              - $ref: '#/$defs/technology_mapping_base'
+              - $ref: "#/$defs/technology_mapping_base"
               - type: object
                 propertyNames:
                   enum:
@@ -178,7 +177,7 @@ properties:
                     - STO
                     - unknown
                 additionalProperties:
-                  $ref: '#/$defs/non_empty_string'
+                  $ref: "#/$defs/non_empty_string"
                 minProperties: 5
                 maxProperties: 5
         required:
@@ -190,10 +189,10 @@ properties:
         additionalProperties: false
         properties:
           excluded_ids:
-            $ref: '#/$defs/excluded_ids'
+            $ref: "#/$defs/excluded_ids"
           technology_mapping:
             allOf:
-              - $ref: '#/$defs/technology_mapping_base'
+              - $ref: "#/$defs/technology_mapping_base"
               - type: object
                 propertyNames:
                   enum:
@@ -213,7 +212,7 @@ properties:
                     - "steam-generating heavy water reactor"
                     - unknown
                 additionalProperties:
-                  $ref: '#/$defs/non_empty_string'
+                  $ref: "#/$defs/non_empty_string"
                 minProperties: 15
                 maxProperties: 15
         required:
@@ -225,15 +224,15 @@ properties:
         additionalProperties: false
         properties:
           excluded_ids:
-            $ref: '#/$defs/excluded_ids'
+            $ref: "#/$defs/excluded_ids"
           technology_mapping:
             allOf:
-              - $ref: '#/$defs/technology_mapping_base'
+              - $ref: "#/$defs/technology_mapping_base"
               - type: object
                 propertyNames:
                   enum: [csp, rooftop_pv, utility_pv]
                 additionalProperties:
-                  $ref: '#/$defs/non_empty_string'
+                  $ref: "#/$defs/non_empty_string"
                 minProperties: 3
                 maxProperties: 3
           dc_ac_ratio:
@@ -245,7 +244,7 @@ properties:
             additionalProperties: false
             properties:
               utility_pv:
-                $ref: '#/$defs/positive_number'
+                $ref: "#/$defs/positive_number"
             required:
               - utility_pv
         required:
@@ -258,7 +257,7 @@ properties:
         additionalProperties: false
         properties:
           excluded_ids:
-            $ref: '#/$defs/excluded_ids'
+            $ref: "#/$defs/excluded_ids"
           source:
             title: Data source
             description: |
@@ -272,12 +271,12 @@ properties:
               - gem
           technology_mapping:
             allOf:
-              - $ref: '#/$defs/technology_mapping_base'
+              - $ref: "#/$defs/technology_mapping_base"
               - type: object
                 propertyNames:
                   enum: [offshore, onshore]
                 additionalProperties:
-                  $ref: '#/$defs/non_empty_string'
+                  $ref: "#/$defs/non_empty_string"
                 minProperties: 2
                 maxProperties: 2
         required:
@@ -298,6 +297,7 @@ properties:
         - "bioenergy: agricultural waste (syngas)"
         - "bioenergy: agricultural waste (unknown)"
         - "bioenergy: biodiesel"
+        - "bioenergy: bio-heavy oil"
         - "bioenergy: ethanol"
         - "bioenergy: paper mill wastes"
         - "bioenergy: refuse (landfill gas)"
@@ -339,10 +339,11 @@ properties:
         - "industrial by-product: unknown"
         - "other: hydrogen (blue)"
         - "other: hydrogen (green)"
+        - "other: hydrogen (gray)"
         - "other: hydrogen (unknown)"
         - "other: tires"
     additionalProperties:
-      $ref: '#/$defs/non_empty_string'
+      $ref: "#/$defs/non_empty_string"
 
   imputation:
     title: Imputation
@@ -379,7 +380,7 @@ properties:
               Applies both to overlap-split plants and to plants forced into a target shape class.
               The point is placed approximately this far inside the selected polygon from the nearest boundary/contact point.
               If the available interior segment is shorter, the midpoint of that segment is used.
-            $ref: '#/$defs/positive_number'
+            $ref: "#/$defs/positive_number"
           on_overlap:
             title: Overlap adjustment method
             description: |
@@ -438,6 +439,6 @@ properties:
               - pre_construction
               - announced
           lifetime_years:
-            $ref: '#/$defs/year_map'
+            $ref: "#/$defs/year_map"
           retirement_delay_years:
-            $ref: '#/$defs/year_map'
+            $ref: "#/$defs/year_map"

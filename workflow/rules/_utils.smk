@@ -89,3 +89,9 @@ def get_files_to_remap(category: str, prefix: str):
         to_combine.append(f"<resources>/automatic/temp/{prefix}_{category}.parquet")
 
     return to_combine
+
+def get_fuel_settings() -> dict:
+    """Standardised access to fuel configuration."""
+    combined = internal["fuels"]
+    combined["mapping"] = combined["mapping"] | config.get("fuel_mapping", {})
+    return combined

@@ -49,7 +49,7 @@ def main(
 
 
 if __name__ == "__main__":
-    sys.stderr = open(snakemake.log[0], "w")
+    sys.stderr = open(snakemake.log[0], "w", buffering=1)
     main(
         gem_gnpt_path=snakemake.input.gem_gnpt,
         technology_mapping=snakemake.params.technology_mapping,
