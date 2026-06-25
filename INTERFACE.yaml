@@ -43,6 +43,7 @@ wildcards:
   adjustment: >
     Whether or not total capacity per country has been re-scaled to fit national statistics.
     Options: "adjusted" or "unadjusted".
-  category: >
-    Powerplant category. A total of seven are available:
-    bioenergy, fossil, geothermal, hydropower, nuclear, solar and wind.
+  category: |
+    Powerplant category. A total of eight are available:
+    bioenergy, fossil, geothermal, hydropower, nuclear, large_solar, solar, and wind.
+    Note that "solar" is only available for aggregated cases.

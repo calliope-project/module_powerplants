@@ -21,7 +21,6 @@ def main(
 ):
     """Obtain nuclear power plants using GEM-GNPT data."""
     raw_df = gem.read_gem_dataset(gem_gnpt_path, ["Data"])
-
     nuclear_df = gpd.GeoDataFrame(
         {
             "powerplant_id": _utils.get_combined_text_col(
@@ -49,7 +48,7 @@ def main(
 
 
 if __name__ == "__main__":
-    sys.stderr = open(snakemake.log[0], "w")
+    sys.stderr = open(snakemake.log[0], "w", buffering=1)
     main(
         gem_gnpt_path=snakemake.input.gem_gnpt,
         technology_mapping=snakemake.params.technology_mapping,

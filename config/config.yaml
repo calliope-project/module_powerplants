@@ -53,6 +53,7 @@ category:
 
   nuclear:
     technology_mapping:
+      advanced boiling water reactor: "nuclear reactor"
       boiling water reactor: "nuclear reactor"
       fast breeder reactor: "nuclear reactor"
       fast neutron reactor: "nuclear reactor"
@@ -60,12 +61,13 @@ category:
       heavy water gas-cooled reactor: "nuclear reactor"
       heavy water light water reactor: "nuclear reactor"
       high temperature gas reactor: "nuclear reactor"
-      liquid-metal-cooled fast reactor: "nuclear reactor"
       light water graphite reactor: "nuclear reactor"
+      liquid-metal-cooled fast reactor: "nuclear reactor"
+      microreactor: "nuclear reactor"
       molten salt reactor: "nuclear reactor"
       pressurized heavy water reactor: "nuclear reactor"
       pressurized water reactor: "nuclear reactor"
-      small modular reactor: "nuclear reactor"
+      small modular reactor: "smr reactor"
       steam-generating heavy water reactor: "nuclear reactor"
       unknown: "nuclear reactor"
 
@@ -134,6 +136,7 @@ imputation:
       reservoir: 80
       rooftop pv: 25
       run of river: 80
+      smr reactor: 50
       steam turbine: 30
       utility pv: 25
     retirement_delay_years:
@@ -155,5 +158,6 @@ imputation:
       reservoir: 10
       rooftop pv: 5
       run of river: 10
+      smr reactor: 50
       steam turbine: 5
       utility pv: 2

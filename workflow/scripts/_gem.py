@@ -7,7 +7,7 @@ import pandas as pd
 
 GEM_GWPT_SHEETS = ["Data", "Below Threshold"]
 
-GEM_GSPT_SHEETS = ["20 MW+", "1-20 MW"]
+GEM_GSPT_SHEETS = ["Utility-Scale (1 MW+)", "Distributed (<1 MW)"]
 GSPT_CAPACITY_RATING_MAPPING = {"MWac": "AC", "MWp/dc": "DC"}
 
 _INVALID_STATUS_VALUES = ["cancelled", "shelved"]
@@ -94,7 +94,9 @@ def output_capacity_mw_gspt(
     )
 
 
-def _remap_fuel_col(cell: str, fuel_mapping: dict, default: str) -> tuple[str, ...]:
+def _remap_fuel_col(
+    cell: str, mapping: dict, default: str, ignored: list[str]
+) -> tuple[str, ...]:
     """Find and replace fuel names using pattern matching."""
     fuels = set()
     if pd.isna(cell):
@@ -110,7 +112,9 @@ def _remap_fuel_col(cell: str, fuel_mapping: dict, default: str) -> tuple[str, .
                 # Too ambiguous to map usefully
                 continue
             try:
-                fuels.add(fuel_mapping[value])
+                if value in ignored:
+                    continue
+                fuels.add(mapping[value])
             except KeyError:
                 raise KeyError(f"No mapped fuel for '{value}'.")
     if len(fuels) == 0:
@@ -121,7 +125,8 @@ def _remap_fuel_col(cell: str, fuel_mapping: dict, default: str) -> tuple[str, .
 
 def get_unique_fuel_dataset(
     raw_fuels: pd.Series,
-    fuel_mapping: dict[str, str],
+    mapping: dict[str, str],
+    ignored: list[str],
     default: str,
     class_prefix: str = "f",
 ) -> tuple[pd.DataFrame, dict]:
@@ -139,7 +144,8 @@ def get_unique_fuel_dataset(
 
     Args:
         raw_fuels (pd.Series[str]): series with fuel values.
-        fuel_mapping (dict[str, str]): fuel mapping (for renaming).
+        mapping (dict[str, str]): fuel mapping (for renaming).
+        ignored (list[str]): fuels to exclude, if detected.
         default (str): default fuel, if missing or unknown.
         class_prefix (str, optional): prefix for the fuel class. Defaults to "f".
 
@@ -147,7 +153,7 @@ def get_unique_fuel_dataset(
         tuple[pd.DataFrame, dict]: clas dataframe and class series.
     """
     fuels = raw_fuels.apply(
-        _remap_fuel_col, fuel_mapping=fuel_mapping, default=fuel_mapping[default]
+        _remap_fuel_col, mapping=mapping, default=mapping[default], ignored=ignored
     )
     fuel_combs = sorted(set(fuels))
     fuel_class_df = pd.DataFrame(

@@ -119,7 +119,7 @@ snakemake --use-conda --cores 2  # run the workflow!
 <!-- Please provide thorough referencing below -->
 
 This module is based on the following research and datasets.
-For specific versions please consult our [stable dataset repository](https://doi.org/10.5281/zenodo.16779120).
+For specific versions please consult our [stable dataset repository](https://doi.org/10.5281/zenodo.16037139).
 
 * **Global Energy Monitor datasets.** <https://globalenergymonitor.org/>. License: CC BY 4.0.
     - Global Bioenergy Power Tracker

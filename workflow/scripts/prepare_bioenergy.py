@@ -28,22 +28,22 @@ def _start_year(gem_df: pd.DataFrame):
     )
 
 
-def main(
-    gem_gbpt_path: str,
-    technology_mapping: dict[str, str],
-    fuel_mapping: dict[str, str],
-    crs: str,
-    output_plants_path: str,
-    output_fuels_path: str,
-):
+def main():
     """Obtain bioenergy power locations using GEM-GBPT data."""
-    raw_df = gem.read_gem_dataset(gem_gbpt_path, ["Data", "Below Threshold"])
+    raw_df = gem.read_gem_dataset(snakemake.input.gem_gbpt, ["Data"])
 
+    fuel_settings = snakemake.params.fuel_settings
     fuels_df, fuel_class = gem.get_unique_fuel_dataset(
-        raw_df["fuel"], fuel_mapping, "bioenergy: unknown", "b"
+        raw_fuels=raw_df["fuel"],
+        mapping=fuel_settings["mapping"],
+        ignored=fuel_settings["ignored"],
+        default="bioenergy: unknown",
+        class_prefix="b",
     )
-    _schemas.FuelSchema.validate(fuels_df).to_parquet(output_fuels_path)
+    _schemas.FuelSchema.validate(fuels_df).to_parquet(snakemake.output.fuels)
 
+    technology_mapping = snakemake.params.technology_mapping
+    crs = snakemake.params.geo_crs
     bioenergy_df = gpd.GeoDataFrame(
         {
             "powerplant_id": _utils.get_combined_text_col(
@@ -64,16 +64,9 @@ def main(
         crs=crs,
     ).reset_index(drop=True)
     schema = _schemas.build_schema(technology_mapping, "prepare")
-    schema.validate(bioenergy_df).to_parquet(output_plants_path)
+    schema.validate(bioenergy_df).to_parquet(snakemake.output.plants)
 
 
 if __name__ == "__main__":
-    sys.stderr = open(snakemake.log[0], "w")
-    main(
-        gem_gbpt_path=snakemake.input.gem_gbpt,
-        technology_mapping=snakemake.params.technology_mapping,
-        fuel_mapping=snakemake.params.fuel_mapping,
-        crs=snakemake.params.geo_crs,
-        output_plants_path=snakemake.output.plants,
-        output_fuels_path=snakemake.output.fuels,
-    )
+    sys.stderr = open(snakemake.log[0], "w", buffering=1)
+    main()

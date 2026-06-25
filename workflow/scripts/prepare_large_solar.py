@@ -18,10 +18,12 @@ if TYPE_CHECKING:
     snakemake: Any
 
 
-def _start_year_tz_sam(tz_dam_df: pd.DataFrame):
+def _start_year_tz_sam(df: pd.DataFrame):
     """Assume installation occurred in the middle of the detection window."""
-    delta = (tz_dam_df["constructed_before"] - tz_dam_df["constructed_after"]) / 2
-    return (tz_dam_df["constructed_after"] + delta).dt.year
+    before = pd.to_datetime(df["constructed_before"])
+    after = pd.to_datetime(df["constructed_after"])
+    delta = (before - after) / 2
+    return (after + delta).dt.year
 
 
 def fill_tz_with_gem(
@@ -207,5 +209,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    sys.stderr = open(snakemake.log[0], "w")
+    sys.stderr = open(snakemake.log[0], "w", buffering=1)
     main()
