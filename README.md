@@ -29,7 +29,7 @@ Data processing steps:
 1. Stable version-controlled global datasets are downloaded, including:
     - Disaggregated powerplant statistics from [GEM](https://globalenergymonitor.org/), [Transition-Zero](https://www.transitionzero.org/products/solar-asset-mapper), and [GloHydroRES](https://zenodo.org/records/14526360).
     - National-level statistics from the [EIA](https://www.eia.gov/).
-2. Individual powerplants are prepared into seven different categories (bioenergy, fossil, geothermal, hydropower, nuclear, solar, wind).
+2. Individual powerplants are prepared into point-source categories: bioenergy, fossil, geothermal, hydropower, nuclear, large_solar, and wind.
     - Fuel-burning powerplants (fossil, bioenergy) are assigned unique fuel-classes depending on the combination of fuels they utilise.
     - For utility-scale solar projects, satellite detected [TZ-Solar Asset Mapper](https://www.transitionzero.org/products/solar-asset-mapper) facilities are matched to [GEM-Global Solar Power Tracker](https://globalenergymonitor.org/) data to obtain a highly complete dataset of large-scale solar facilities.
 3. Powerplants are selected according to the shapes file provided by the user. Depending on the configuration, their placement may be adjusted per technology and country.
@@ -70,6 +70,7 @@ Data processing steps:
     1. Per country: $solar_{rooftopPV} = solar_{nationalStatistics} - solar_{largeScale}$.
     2. A user-provided proxy raster is used to determine how to disaggregate $solar_{rooftopPV}$.
     3. This proxy is used to determine the aggregated rooftop PV capacity per-shape.
+    4. The final aggregated `solar` output combines `large_solar` facilities with proxied rooftop PV capacity.
 
 <p align="center">
   <img src="./figures/rooftop_pv_proxy_MEX.png" width="60%">
@@ -77,6 +78,13 @@ Data processing steps:
 
 > [!NOTE]
 > Due to this assumption, the lifetime of rooftop PV capacity is left undetermined.
+
+### Important assumptions
+
+- The current reference year for operating capacity, national statistics adjustment, and status imputation is `2024`.
+- User-provided shapes should add up to whole countries. This is required for national statistics and rooftop PV proxying to remain meaningful.
+- Adjusted outputs rescale operating powerplants to match EIA national category totals. Future and retired plants are kept unchanged.
+- `large_solar` is available as a point-source category for utility PV and CSP. `solar` is only available for aggregated outputs because rooftop PV is represented through a proxy raster rather than individual plant points.
 
 
 ## Configuration
@@ -87,7 +95,22 @@ Please consult the configuration [README](./config/README.md) and the [configura
 ## Input / output structure
 <!-- Please describe input / output file placement below -->
 
-Please consult the [interface file](./INTERFACE.yaml) for more information.
+Required user inputs:
+
+- `<shapes>`: GeoParquet file with the target regional disaggregation. It must contain `shape_id`, `country_id` (ISO-3), `shape_class` (`land` or `maritime`), and valid polygon geometry.
+- `<proxy_rooftop_pv>`: GeoTIFF proxy raster to use for adjusted aggregated `solar` outputs.
+
+Optional user inputs:
+
+- `<imputed_powerplants>`: category-specific GeoParquet files with additional point-source powerplants. These can add missing facilities or replace source records when combined with the `excluded_ids` configuration value.
+- `<wemi>`: Wind Energy Market Intelligence `.xls` file, required only when `category.wind.source` is set to `wemi`.
+
+Main outputs:
+
+- `<powerplants>`: disaggregated point-source powerplants. `unadjusted` outputs are available for `bioenergy`, `fossil`, `geothermal`, `hydropower`, `nuclear`, `large_solar`, and `wind`; `adjusted` outputs are available for the same categories except `large_solar`.
+- `<aggregated_capacity>`: capacity aggregated to the user-provided shapes. `bioenergy`, `fossil`, `geothermal`, `hydropower`, `nuclear`, and `wind` are available as `adjusted` or `unadjusted`; `large_solar` is available as `unadjusted`; `solar` is available as `adjusted`.
+
+Please consult the [interface file](./INTERFACE.yaml) for exact path variables and wildcards.
 
 ## Development
 <!-- Please do not modify this templated section -->
