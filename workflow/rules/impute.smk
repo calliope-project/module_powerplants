@@ -30,7 +30,7 @@ rule impute_location:
     wildcard_constraints:
         category="|".join(IMPUTED_CAT),
     conda:
-        "../envs/powerplants.yaml"
+        "../envs/module.yaml"
     params:
         crs=internal["crs"] | config["crs"],
         location_cnf=config["imputation"]["location"],
@@ -68,7 +68,7 @@ rule impute_time:
     wildcard_constraints:
         dataset="|".join(IMPUTED_CAT),
     conda:
-        "../envs/powerplants.yaml"
+        "../envs/module.yaml"
     params:
         imputation=config["imputation"]["time"],
         tech_map=lambda wc: get_technology_mapping(wc.category),
@@ -99,7 +99,7 @@ rule impute_capacity_adjustment:
     wildcard_constraints:
         category="|".join(IMPUTED_CAT - IMPUTED_CAT_WITHOUT_ADJUSTMENT),
     conda:
-        "../envs/powerplants.yaml"
+        "../envs/module.yaml"
     message:
         "National-level adjustment of powerplant capacity in {wildcards.shapes}-{wildcards.category} to EIA statistics."
     script:

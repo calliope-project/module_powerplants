@@ -1,7 +1,7 @@
 [workspace]
 name = "module_powerplants"
 authors = ["See AUTHORS file"]
-description = "Aggregate global powerplant capacities into any resolution."
+description = "A data module to estimate global powerplant capacities for any region in the world at any resolution."
 license = "Apache-2.0"
 readme = "README.md"
 channels = ["conda-forge", "bioconda"]
@@ -9,7 +9,7 @@ platforms = ["win-64", "linux-64", "osx-arm64"]
 homepage = "https://www.modelblocks.org/"
 
 [dependencies]
-clio-tools = ">=2026.03.30"
+clio-tools = ">=2026.06.23"
 conda = ">=25.0.0"
 ipdb = ">=0.13.13"
 ipykernel = ">=6.29.5"
@@ -19,37 +19,52 @@ pytest = ">=8.3.5"
 python = ">=3.12"
 ruff = ">=0.9.9"
 snakefmt = ">=0.10.2"
-snakemake-minimal = ">=8.29.0"
+snakemake-minimal = ">=9.19.0"
 pytz = ">=2026.1.post1"
-pyarrow = ">=23.0.1,<24"
+pyarrow = ">=24.0.0"
+
+[feature.module.dependencies]
+curl = ">=8.9.1"
+click= ">=8.2.1"
+cmap = ">=0.7.2"
+dask = ">=2025.7.0"
+geopandas = ">=1.0.1"
+ipdb = ">=0.13.13"
+openpyxl = ">=3.1.5"
+numpy = ">=2.3.5"
+matplotlib = ">=3.10.3"
+pandas = ">=2.3.0"
+pandera-geopandas = ">=0.24.0"
+pyarrow = ">=19.0.1"
+pyproj = ">=3.7.1"
+python = ">=3.12.9"
+pyyaml = ">=6.0.2"
+xlrd = ">=2.0.1"
+gregor = ">=0.1.0"
+
+[environments]
+module = { features = ["module"], no-default-feature = true }
 
 [tasks]
 test-integration = {cmd = "pytest tests/integration_test.py"}
 
-[feature.powerplants]
-channels = ["conda-forge", "nodefaults"]
 
-[feature.powerplants.dependencies]
-click = "8.2.1.*"
-cmap = "0.7.1.*"
-dask = "2025.7.0.*"
-geopandas = "1.0.1.*"
-ipdb = "0.13.13.*"
-openpyxl = "3.1.5.*"
-numpy = "2.3.5.*"
-matplotlib = "3.10.3.*"
-pandas = "2.3.0.*"
-pandera-geopandas = "0.24.0.*"
-pyarrow = "19.0.1.*"
-pyproj = "3.7.1.*"
-python = "3.12.9.*"
-pyyaml = "6.0.2.*"
-xlrd = "2.0.1.*"
-pip = "25.1.1.*"
-mypy = "1.20.1.*"
+[tasks.export-snakemake-env]
+description = "Export one Pixi environment as Snakemake-compatible conda files"
+args = ["env", { arg = "outdir", default = "workflow/envs" }]
+depends-on = [
+  { task = "_export-snakemake-pin", args = ["{{ env }}", "win-64", "{{ outdir }}"] },
+  { task = "_export-snakemake-pin", args = ["{{ env }}", "linux-64", "{{ outdir }}"] },
+  { task = "_export-snakemake-pin", args = ["{{ env }}", "osx-arm64", "{{ outdir }}"] },
+]
+cmd = "pixi workspace export conda-environment --environment '{{ env }}' '{{ outdir }}/{{ env }}.yaml'"
 
-[feature.powerplants.pypi-dependencies]
-gregor = { git = "https://github.com/jnnr/gregor.git", rev = "fix-memory-explosion" }
+[tasks._export-snakemake-pin]
+description = "Export one Pixi environment/platform as a Snakemake-compatible pin file"
+args = ["env", "platform", { arg = "outdir", default = "workflow/envs" }]
+cmd = """
+set -e
+pixi workspace export conda-explicit-spec --environment '{{ env }}' --platform '{{ platform }}' '{{ outdir }}'
+mv '{{ outdir }}/{{ env }}_{{ platform }}_conda_spec.txt' '{{ outdir }}/{{ env }}.{{ platform }}.pin.txt'
+"""
 
-[environments]
-powerplants = { features = ["powerplants"], no-default-feature = true }

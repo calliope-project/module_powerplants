@@ -19,7 +19,7 @@ rule aggregate_capacity:
         adjustment="|".join(ADJUSTMENTS),
         category="|".join(IMPUTED_CAT),
     conda:
-        "../envs/powerplants.yaml"
+        "../envs/module.yaml"
     params:
         category=lambda wc: wc.category,
         proj_crs=config["crs"]["projected"],

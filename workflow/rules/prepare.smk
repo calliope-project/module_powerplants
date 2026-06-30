@@ -9,7 +9,7 @@ rule prepare_hydropower:
     log:
         "<logs>/prepare_hydropower.log",
     conda:
-        "../envs/powerplants.yaml"
+        "../envs/module.yaml"
     params:
         technology_mapping=config["category"]["hydropower"]["technology_mapping"],
         geo_crs=internal["crs"]["geographic"],
@@ -28,7 +28,7 @@ rule prepare_large_solar:
     log:
         "<logs>/prepare_large_solar.log",
     conda:
-        "../envs/powerplants.yaml"
+        "../envs/module.yaml"
     params:
         dc_ac_ratio=config["category"]["solar"]["dc_ac_ratio"]["utility_pv"],
         utility_pv_name=config["category"]["solar"]["technology_mapping"]["utility_pv"],
@@ -50,7 +50,7 @@ if config["category"]["wind"]["source"] == "gem":
         log:
             "<logs>/prepare_wind_gem.log",
         conda:
-            "../envs/powerplants.yaml"
+            "../envs/module.yaml"
         params:
             tech_map=config["category"]["wind"]["technology_mapping"],
             geo_crs=internal["crs"]["geographic"],
@@ -69,7 +69,7 @@ elif config["category"]["wind"]["source"] == "wemi":
         log:
             "<logs>/prepare_wind_wemi.log",
         conda:
-            "../envs/powerplants.yaml"
+            "../envs/module.yaml"
         params:
             geo_crs=internal["crs"]["geographic"],
             tech_map=config["category"]["wind"]["technology_mapping"],
@@ -93,7 +93,7 @@ rule prepare_bioenergy:
     log:
         "<logs>/prepare_bioenergy.log",
     conda:
-        "../envs/powerplants.yaml"
+        "../envs/module.yaml"
     params:
         geo_crs=internal["crs"]["geographic"],
         fuel_settings=get_fuel_settings(),
@@ -116,7 +116,7 @@ rule prepare_fossil:
     log:
         "<logs>/prepare_fossil.log",
     conda:
-        "../envs/powerplants.yaml"
+        "../envs/module.yaml"
     params:
         geo_crs=internal["crs"]["geographic"],
         fuel_settings=get_fuel_settings(),
@@ -135,7 +135,7 @@ rule prepare_nuclear:
     log:
         "<logs>/prepare_nuclear.log",
     conda:
-        "../envs/powerplants.yaml"
+        "../envs/module.yaml"
     params:
         geo_crs=internal["crs"]["geographic"],
         technology_mapping=config["category"]["nuclear"]["technology_mapping"],
@@ -153,7 +153,7 @@ rule prepare_geothermal:
     log:
         "<logs>/prepare_geothermal.log",
     conda:
-        "../envs/powerplants.yaml"
+        "../envs/module.yaml"
     params:
         geo_crs=internal["crs"]["geographic"],
         technology_mapping=config["category"]["geothermal"]["technology_mapping"],
@@ -174,7 +174,7 @@ rule prepare_statistics:
     log:
         "<logs>/{shapes}/prepare_statistics.log",
     conda:
-        "../envs/powerplants.yaml"
+        "../envs/module.yaml"
     message:
         "Get EIA annual country capacity statistics."
     script:
@@ -193,7 +193,7 @@ rule prepare_fuel_classes:
     log:
         "<logs>/prepare_fuels.log",
     conda:
-        "../envs/powerplants.yaml"
+        "../envs/module.yaml"
     message:
         "Get a harmonised dataset of fuel class combinations."
     script:
@@ -212,7 +212,7 @@ rule remap_fuel_classes:
     wildcard_constraints:
         category="|".join(COMBINED_FUEL_CAT),
     conda:
-        "../envs/powerplants.yaml"
+        "../envs/module.yaml"
     message:
         "Remap fuel classes of combustion plants to harmonised ones."
     script:
@@ -227,7 +227,7 @@ rule prepare_shapes:
     log:
         "<logs>/{shapes}/prepare_shapes.log",
     conda:
-        "../envs/powerplants.yaml"
+        "../envs/module.yaml"
     params:
         crs=config["crs"]["projected"],
     message:
