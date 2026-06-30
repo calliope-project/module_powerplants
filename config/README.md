@@ -9,13 +9,14 @@ We recommend consulting the following before using this module:
 The main configuration groups are:
 
 - `crs.projected`: projected coordinate reference system to use for distance and area operations.
+Adapt this to your [region of interest](https://epsg.io/) to get accurate area estimates.
 - `category`:
     - `[CATEGORY_NAME].technology_mapping`: rename / regroup source technology labels to the names used in module outputs.
     - `[CATEGORY_NAME].excluded_ids`: drop specific powerplants during processing.
     Useful if you wish to correct powerplant data via `<imputed_powerplants>` files.
-    - `wind.source`: selects either the open GEM wind dataset (`gem`) or a user-provided WEMI file (`wemi`).
+    - `wind.source`: selects either the open [GEM wind dataset](https://globalenergymonitor.org/projects/global-wind-power-tracker) (`gem`) or a user-provided [WEMI file](https://www.thewindpower.net/index.php) (`wemi`).
     - `solar.dc_ac_ratio`: converts utility PV capacity from DC to AC where needed.
-    We recommend using the the 1.25 default.
+    We recommend using the 1.25 default.
 - `fuel_mapping`: optional overrides for combustion fuel names.
 - `imputation`:
     - `location`: controls shape overlaps and technology-to-`shape_class` handling.
