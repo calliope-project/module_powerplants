@@ -4,8 +4,8 @@ PLEASE ENSURE THIS SET OF MINIMAL TESTS WORKS BEFORE PUBLISHING YOUR MODULE.
 Contents may be updated in future template updates.
 """
 
-import shutil
 import subprocess
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -13,26 +13,34 @@ from clio_tools.data_module import ModuleInterface
 
 
 @pytest.fixture(scope="module")
-def module_path():
-    """Parent directory of the project."""
-    return Path(__file__).parent.parent
+def pixi_platforms(module_path) -> list[str]:
+    """Pixi platforms defined for this project."""
+    with (module_path / "pixi.toml").open("rb") as pixi_config:
+        return tomllib.load(pixi_config)["workspace"]["platforms"]
 
 
-@pytest.fixture(scope="module")
-def integration_path(user_path: Path, module_path: Path):
-    """Ensures the minimal integration test is ready."""
-    integration_dir = Path(module_path / "tests/integration")
-    if integration_dir.exists():
-        # clean everything
-        shutil.rmtree(integration_dir / "resources", ignore_errors=True)
-        shutil.rmtree(integration_dir / "results/", ignore_errors=True)
-    user_integ_dir = integration_dir / "resources/inputs/"
-    files_to_copy = ["MNE/proxies/rooftop_pv.tif", "MNE/shapes.parquet"]
-    for file in files_to_copy:
-        destination_file = Path(user_integ_dir / file)
-        destination_file.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy(user_path / file, destination_file)
-    return integration_dir
+def test_snakemake_environments(module_path, pixi_platforms, tmp_path):
+    """All Snakemake environment files should be based on pixi counterparts."""
+    env_dir = module_path / "workflow/envs"
+    env_files = sorted(env_dir.glob("*.yaml"))
+    assert env_files, f"No conda environments found in {module_path}."
+
+    for env_file in env_files:
+        env_name = env_file.stem
+
+        output_dir = tmp_path / env_name
+        subprocess.run(
+            ["pixi", "run", "export-snakemake-env", env_name, str(output_dir)],
+            check=True,
+            cwd=module_path,
+        )
+
+        generated_yaml = output_dir / env_file.name
+        assert generated_yaml.read_text() == env_file.read_text()
+
+        for platform in pixi_platforms:
+            pin_file = env_dir / f"{env_name}.{platform}.pin.txt"
+            assert pin_file.exists(), f"{env_name} has no conda pins for {platform}"
 
 
 def test_interface_file(module_path):
@@ -63,7 +71,7 @@ def test_snakemake_all_failure(module_path):
     process = subprocess.run(
         "snakemake --cores 1", shell=True, cwd=module_path, capture_output=True
     )
-    assert "INVALID (missing locally)" in str(process.stderr)
+    assert "INVALID" in str(process.stderr)
 
 
 def test_snakemake_integration_testing(integration_path):

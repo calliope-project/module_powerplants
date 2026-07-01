@@ -7,7 +7,7 @@ rule download_eia:
     log:
         "<logs>/download_eia.log",
     conda:
-        "../envs/shell.yaml"
+        "../envs/module.yaml"
     params:
         retry=internal["curl"]["retry"],
         url=internal["resources"]["automatic"]["EIA"],
@@ -25,7 +25,7 @@ rule download_tz_sam:
     log:
         "<logs>/download_tz_sam.log",
     conda:
-        "../envs/shell.yaml"
+        "../envs/module.yaml"
     params:
         retry=internal["curl"]["retry"],
         url=internal["resources"]["automatic"]["TZ-SAM"],
@@ -43,7 +43,7 @@ rule download_glohydrores:
     log:
         "<logs>/download_glohydrores.log",
     conda:
-        "../envs/shell.yaml"
+        "../envs/module.yaml"
     params:
         retry=internal["curl"]["retry"],
         url=internal["resources"]["automatic"]["GloHydroRes"],
@@ -61,7 +61,7 @@ rule download_gem:
     log:
         "<logs>/download_gem_{dataset}.log",
     conda:
-        "../envs/shell.yaml"
+        "../envs/module.yaml"
     params:
         retry=internal["curl"]["retry"],
         url=lambda wc: internal["resources"]["automatic"]["GEM"][wc.dataset],

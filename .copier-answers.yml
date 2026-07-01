@@ -1,12 +1,13 @@
 # Changes here will be overwritten by Copier
 # !!!!! DO NOT MANUALLY MODIFY THIS FILE !!!!!
-_commit: latest
+_commit: v1.0.2
 _src_path: https://github.com/modelblocks-org/data-module-template.git
 author_email: i.ruizmanuel@tudelft.nl
 author_family_name: Ruiz Manuel
 author_given_name: Ivan
 github_org: modelblocks-org
 license: Apache-2.0
-module_description: Aggregate global powerplant capacities into any resolution.
-module_long_name: Modelblocks - Powerplants module
+module_description: A data module to estimate global powerplant capacities for any
+    region in the world at any resolution.
+module_long_name: Powerplants module
 module_short_name: module_powerplants

@@ -3,8 +3,8 @@
 # https://citation-file-format.github.io/
 cff-version: 1.2.0
 message: If you use this software or data produced by it, please cite it using the metadata from this file.
-title: "clio - module_powerplants: clio - Powerplants module"
-repository: "https://github.com/calliope-project/module_powerplants"
+title: "Modelblocks - module_powerplants: Powerplants module"
+repository: "https://github.com/modelblocks-org/module_powerplants"
 license: Apache-2.0
 authors:
   - given-names: Ivan

@@ -33,7 +33,7 @@ rule proxy_rooftop_pv:
     log:
         "<logs>/{shapes}/proxy_rooftop_pv.log",
     conda:
-        "../envs/powerplants.yaml"
+        "../envs/module.yaml"
     params:
         category="solar",
     message:
@@ -73,7 +73,7 @@ rule impute_adjustment_solar:
     log:
         "<logs>/{shapes}/adjusted/solar/aggregate_solar_capacity.log",
     conda:
-        "../envs/powerplants.yaml"
+        "../envs/module.yaml"
     params:
         category="solar",
         proj_crs=config["crs"]["projected"],
