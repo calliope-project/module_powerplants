@@ -444,3 +444,17 @@ properties:
             $ref: "#/$defs/year_map"
           retirement_delay_years:
             $ref: "#/$defs/year_map"
+          start_year_imputation_method:
+            title: Start year imputation method
+            description: |
+              Method used to impute missing start years after direct backfilling
+              from known end years. 'group_average' preserves the previous
+              behaviour by assigning rounded group-average start years.
+              'capacity_profile' assigns missing start years deterministically
+              using capacity-weighted commissioning profiles from comparable
+              assets.
+            type: string
+            enum:
+              - group_average
+              - capacity_profile
+            default: group_average

@@ -118,6 +118,7 @@ imputation:
       utility pv: "land"
   time:
     scenario: "construction" # Options: historical->construction->pre_construction->announced
+    start_year_imputation_method: capacity_profile # enum: group_average, capacity_profile
     lifetime_years:
       # General lifetime assumptions. Adjust as needed!
       bioenergy turbine: 25

@@ -2,6 +2,7 @@
 
 import math
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import _plots
@@ -17,6 +18,7 @@ if TYPE_CHECKING:
     snakemake: Any
 
 HISTORICAL = {"operating", "retired"}
+CURRENT = {"operating"}
 SCENARIO_MAP = {
     "historical": HISTORICAL,
     "construction": HISTORICAL | {"construction"},
@@ -24,53 +26,326 @@ SCENARIO_MAP = {
     "announced": HISTORICAL | {"construction", "pre-construction", "announced"},
 }
 
+def _initial_year_source_type(year: pd.Series) -> pd.Series:
+    """Label whether year values were originally present or missing."""
+    source_type = pd.Series("observed", index=year.index, dtype="object")
+    source_type.loc[year.isna()] = "missing_unresolved"
+    return source_type
 
-def _impute_start_year(
-    prepared_df: pd.DataFrame, lifetimes: dict[str, int]
+
+def _matching_group_mask(
+    df: pd.DataFrame,
+    group_cols: list[str],
+    group_key: tuple,
 ) -> pd.Series:
-    """Fill start year using reasonable assumptions and user settings."""
-    start_year = prepared_df["start_year"].copy()
+    """Return rows matching a groupby key, including missing values."""
+    mask = pd.Series(True, index=df.index)
 
-    # Impute using the lifetime if possible.
-    mask_life = start_year.isna() & prepared_df["end_year"].notna()
-    start_year[mask_life] = prepared_df.loc[mask_life, "end_year"] - prepared_df.loc[
-        mask_life, "technology"
-    ].map(lifetimes)
-    # Impute using country averages.
-    averages = (
-        prepared_df.groupby(["country_id", "category", "technology", "status"])[
-            "start_year"
-        ]
-        .transform("mean")
-        .round()
-    )
-    mask_na = start_year.isna()
-    start_year.loc[mask_na] = averages[mask_na]
+    for col, value in zip(group_cols, group_key):
+        if pd.isna(value):
+            mask &= df[col].isna()
+        else:
+            mask &= df[col].eq(value)
 
-    return start_year
+    return mask
 
-
-def _impute_end_year(
-    df: pd.DataFrame, lifetimes: dict[str, int], delay: dict[str, int]
+def _build_capacity_weighted_start_year_profile(
+    dated_df: pd.DataFrame,
+    feasible_years: np.ndarray,
+    smoothing_window: int = 5,
 ) -> pd.Series:
-    """Impute end_year using lifetime.
+    """Build smoothed capacity-weighted start-year weights.
 
-    Old plants operating beyond lifetime will retired with a given delay.
+    The profile is based on dated assets in a comparable group. If no dated
+    capacity is available within the feasible lifetime window, a uniform
+    fallback over feasible years is returned.
     """
-    ref_year = _utils.DATASET_YEAR
+    year_index = pd.Index(feasible_years, name="start_year")
+    weights = pd.Series(0.0, index=year_index, dtype=float)
 
-    # Impute expected end year only if no data is present.
-    expected_end = df["start_year"] + df["technology"].map(lifetimes)
-    result = df["end_year"].copy().fillna(expected_end)
+    if len(feasible_years) == 0:
+        return weights
 
-    # Plants operating beyond expected lifetime will be retired after a delay of >=1 yr
-    needs_delay = (result <= ref_year) & (df["status"] == "operating")
-    delayed_end = result + df["technology"].map(delay).fillna(0).astype(int)
-    delayed_end = delayed_end.clip(lower=ref_year + 1)
-    result.loc[needs_delay] = delayed_end.loc[needs_delay]
+    profile_data = dated_df.dropna(subset=["start_year", "output_capacity_mw"])
+
+    if not profile_data.empty:
+        profile = (
+            profile_data.assign(
+                start_year=lambda df: df["start_year"]
+            )
+            .groupby("start_year")["output_capacity_mw"]
+            .sum()
+            .astype(float)
+        )
+
+        profile = profile.reindex(year_index, fill_value=0.0)
+        weights.loc[:] = profile
+
+    if smoothing_window > 1:
+        weights = weights.rolling(
+            window=smoothing_window,
+            center=True,
+            min_periods=1,
+        ).mean()
+
+    if not np.isfinite(weights.sum()) or weights.sum() <= 0:
+        weights.loc[:] = 1.0
+
+    return weights / weights.sum()
+
+def _weighted_quantile_years(
+    year_weights: pd.Series,
+    quantiles: pd.Series,
+) -> pd.Series:
+    """Map quantiles to years using a weighted year distribution."""
+    year_weights = year_weights.sort_index()
+    years = year_weights.index.to_numpy()
+    cdf = year_weights.cumsum().to_numpy()
+
+    positions = np.searchsorted(cdf, quantiles.to_numpy(), side="left")
+    positions = np.clip(positions, 0, len(years) - 1)
+
+    return pd.Series(years[positions], index=quantiles.index, dtype=float)
+
+def _allocate_start_years_by_capacity_profile(
+    undated_df: pd.DataFrame,
+    year_weights: pd.Series,
+) -> pd.Series:
+    """Allocate missing start years deterministically by plant capacity.
+
+    Plants are ordered deterministically, converted to cumulative capacity
+    quantiles, and then mapped onto the weighted commissioning-year profile.
+    """
+    if year_weights.empty or undated_df.empty:
+        return pd.Series(np.nan, index=undated_df.index, dtype=float)
+
+    capacities = (
+        undated_df["output_capacity_mw"]
+        .fillna(0.0)
+        .astype(float)
+        .clip(lower=0.0)
+    )
+
+    if capacities.sum() <= 0:
+        capacities = pd.Series(1.0, index=undated_df.index, dtype=float)
+
+    order = pd.DataFrame(
+        {
+            "capacity": capacities,
+            "powerplant_id": undated_df["powerplant_id"].astype(str),
+            "row_order": np.arange(len(undated_df)),
+        },
+        index=undated_df.index,
+    ).sort_values(
+        ["capacity", "powerplant_id", "row_order"],
+        ascending=[False, True, True],
+    )
+
+    ordered_capacity = capacities.loc[order.index]
+    quantiles = (
+        ordered_capacity.cumsum() - 0.5 * ordered_capacity
+    ) / ordered_capacity.sum()
+
+    assigned = _weighted_quantile_years(year_weights, quantiles)
+
+    return assigned.reindex(undated_df.index)
+
+def _impute_start_years_by_capacity_profile(
+    prepared_df: pd.DataFrame,
+    lifetimes: dict[str, int],
+    group_cols: list[str] | None = None,
+    smoothing_window: int = 5,
+) -> pd.Series:
+    """Impute missing start years from country-technology capacity profiles.
+
+    The profile is learned from dated assets in the same group and restricted
+    to each technology's feasible lifetime window. If no dated profile exists
+    within that window, the method falls back to a uniform distribution across
+    feasible years.
+    """
+    if group_cols is None:
+        group_cols = ["country_id", "category", "technology", "status"]
+
+    start_year = prepared_df["start_year"].copy()
+    lifetime = prepared_df["technology"].map(lifetimes)
+
+    result = pd.Series(np.nan, index=prepared_df.index, dtype=float)
+    missing_mask = (
+        start_year.isna()
+        & lifetime.notna()
+        & prepared_df["status"].isin(CURRENT)
+    )
+
+    if not missing_mask.any():
+        return result
+
+    grouped_missing = prepared_df.loc[missing_mask].groupby(
+        group_cols,
+        dropna=False,
+    )
+
+    for group_key, undated_group in grouped_missing:
+        if not isinstance(group_key, tuple):
+            group_key = (group_key,)
+
+        group_lifetime = lifetime.loc[undated_group.index].dropna()
+
+        if group_lifetime.empty:
+            continue
+
+        # With country_id + technology grouping this should be a single value.
+        lifetime_years = int(group_lifetime.mode().iloc[0])
+        feasible_years = np.arange(
+            _utils.DATASET_YEAR - lifetime_years,
+            _utils.DATASET_YEAR + 1,
+        )
+
+        group_mask = _matching_group_mask(prepared_df, group_cols, group_key)
+        dated_group = prepared_df.loc[group_mask & start_year.notna()].copy()
+        dated_group["start_year"] = start_year.loc[dated_group.index]
+
+        year_weights = _build_capacity_weighted_start_year_profile(
+            dated_group,
+            feasible_years,
+            smoothing_window=smoothing_window,
+        )
+
+        result.loc[undated_group.index] = (
+            _allocate_start_years_by_capacity_profile(
+                undated_group,
+                year_weights,
+            )
+        )
 
     return result
 
+def _impute_start_years_by_group_average(
+    prepared_df: pd.DataFrame,
+    group_cols: list[str] | None = None,
+) -> pd.Series:
+    """Impute missing start years using rounded group-average start years."""
+    if group_cols is None:
+        group_cols = ["country_id", "category", "technology", "status"]
+
+    start_year = prepared_df["start_year"].copy()
+
+    averages = (
+        prepared_df.groupby(group_cols, dropna=False)["start_year"]
+        .transform("mean")
+        .round()
+    )
+
+    result = pd.Series(np.nan, index=prepared_df.index, dtype=float)
+    mask_na = start_year.isna()
+    result.loc[mask_na] = averages.loc[mask_na]
+
+    return result
+
+def _impute_remaining_start_years(
+    prepared_df: pd.DataFrame,
+    lifetimes: dict[str, int],
+    method: str = "group_average",
+) -> pd.Series:
+    """Impute start years that remain missing after direct lifetime backfilling."""
+    if method == "group_average":
+        return _impute_start_years_by_group_average(prepared_df)
+
+    if method == "capacity_profile":
+        return _impute_start_years_by_capacity_profile(prepared_df, lifetimes)
+
+    raise ValueError(
+        "Unknown start-year imputation method "
+        f"{method!r}. Expected 'group_average' or 'capacity_profile'."
+    )
+
+def _impute_start_year(
+    prepared_df: pd.DataFrame,
+    lifetimes: dict[str, int],
+    method: str = "group_average",
+) -> tuple[pd.Series, pd.Series]:
+    """Impute missing powerplant start years and track source labels."""
+    start_year = prepared_df["start_year"].copy()
+    start_year_source_type = _initial_year_source_type(start_year)
+
+    lifetime = prepared_df["technology"].map(lifetimes)
+
+    # First, preserve the direct deterministic backfill from known end year.
+    direct_backfill_mask = (
+        start_year.isna()
+        & prepared_df["end_year"].notna()
+        & lifetime.notna()
+    )
+    start_year.loc[direct_backfill_mask] = (
+        prepared_df.loc[direct_backfill_mask, "end_year"]
+        - lifetime.loc[direct_backfill_mask]
+    )
+    start_year_source_type.loc[direct_backfill_mask] = "derived_from_end_year"
+
+    # Then impute only the start years that remain missing.
+    remaining_missing_mask = start_year.isna()
+
+    if remaining_missing_mask.any():
+        imputation_df = prepared_df.copy()
+        imputation_df["start_year"] = start_year
+
+        imputed_start_year = _impute_remaining_start_years(
+            imputation_df,
+            lifetimes=lifetimes,
+            method=method,
+        )
+
+        fallback_imputed_mask = (
+            remaining_missing_mask
+            & imputed_start_year.notna()
+        )
+
+        start_year.loc[fallback_imputed_mask] = imputed_start_year.loc[
+            fallback_imputed_mask
+        ]
+        start_year_source_type.loc[fallback_imputed_mask] = f"imputed_{method}"
+
+    return start_year, start_year_source_type
+
+def _impute_end_year(
+    df: pd.DataFrame,
+    lifetimes: dict[str, int],
+    delay: dict[str, int],
+) -> tuple[pd.Series, pd.Series]:
+    """Impute end_year using lifetime and track source labels.
+
+    Old plants operating beyond lifetime will be retired with a given delay.
+    """
+    ref_year = _utils.DATASET_YEAR
+
+    end_year = df["end_year"].copy()
+    end_year_source_type = _initial_year_source_type(end_year)
+
+    expected_end = df["start_year"] + df["technology"].map(lifetimes)
+
+    lifetime_fill_mask = end_year.isna() & expected_end.notna()
+    result = end_year.copy()
+    result.loc[lifetime_fill_mask] = expected_end.loc[lifetime_fill_mask]
+    end_year_source_type.loc[lifetime_fill_mask] = (
+        "derived_from_start_year_lifetime"
+    )
+
+    # Plants operating beyond expected lifetime will be retired after a delay
+    # of >=1 yr.
+    needs_delay = (result <= ref_year) & (df["status"] == "operating")
+    delayed_end = result + df["technology"].map(delay).fillna(0).astype(int)
+    delayed_end = delayed_end.clip(lower=ref_year + 1)
+
+    result.loc[needs_delay] = delayed_end.loc[needs_delay]
+
+    end_year_source_type.loc[
+        needs_delay & lifetime_fill_mask
+    ] = "derived_from_start_year_lifetime_with_retirement_delay"
+
+    end_year_source_type.loc[
+        needs_delay & ~lifetime_fill_mask
+    ] = "observed_adjusted_with_retirement_delay"
+
+    return result, end_year_source_type
 
 def _impute_status(df: pd.DataFrame) -> pd.Series:
     """Impute powerplant status.
@@ -90,9 +365,76 @@ def _impute_status(df: pd.DataFrame) -> pd.Series:
 
     return status
 
+def _build_age_imputation_diagnostics(
+    original_df: pd.DataFrame,
+    aged_df: pd.DataFrame,
+    status_final: pd.Series,
+    start_year_source_type: pd.Series,
+    end_year_source_type: pd.Series,
+    lifetimes: dict[str, int],
+    start_year_imputation_method: str,
+) -> pd.DataFrame:
+    """Build row-level diagnostics for powerplant age imputation."""
+    diagnostics = pd.DataFrame(index=original_df.index)
+
+    passthrough_cols = [
+        "powerplant_id",
+        "name",
+        "country_id",
+        "category",
+        "technology",
+        "output_capacity_mw",
+    ]
+
+    for col in passthrough_cols:
+        if col in original_df.columns:
+            diagnostics[col] = original_df[col]
+
+    diagnostics["lifetime"] = original_df["technology"].map(lifetimes)
+
+    diagnostics["status_original"] = original_df["status"]
+    diagnostics["status_final"] = status_final.reindex(original_df.index)
+
+    diagnostics["start_year_original"] = original_df["start_year"]
+    diagnostics["start_year"] = aged_df["start_year"].reindex(original_df.index)
+    diagnostics["start_year_source_type"] = start_year_source_type.reindex(
+        original_df.index
+    )
+
+    diagnostics["end_year_original"] = original_df["end_year"]
+    diagnostics["end_year"] = aged_df["end_year"].reindex(original_df.index)
+    diagnostics["end_year_source_type"] = end_year_source_type.reindex(
+        original_df.index
+    ) 
+    
+    # TODO: these source types should be reflected in scripts/_schemas
+
+    diagnostics["retained_after_time_imputation"] = (
+        diagnostics["start_year"].notna()
+        & diagnostics["end_year"].notna()
+    )
+
+    diagnostics["start_year_imputation_method"] = start_year_imputation_method
+
+    return diagnostics.reset_index(drop=True)
+
+def _save_age_imputation_diagnostics(
+    diagnostics: pd.DataFrame,
+    output_path_str: str | None,
+) -> None:
+    """Save row-level age-imputation diagnostics if requested."""
+    if output_path_str is None:
+        return
+
+    output_path = Path(output_path_str)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    diagnostics.to_csv(output_path, index=False)
 
 def impute(
-    relocated_gdf: gpd.GeoDataFrame, imputation: dict, technology_mapping: dict
+    relocated_gdf: gpd.GeoDataFrame,
+    imputation: dict,
+    technology_mapping: dict,
+    age_imputation_output_path: str | None = None,
 ) -> gpd.GeoDataFrame:
     """Add automatic and user imputations to fill missing data.
 
@@ -103,6 +445,10 @@ def impute(
     """
     if relocated_gdf.empty:
         imputed = relocated_gdf
+        _save_age_imputation_diagnostics(
+            pd.DataFrame(),
+            age_imputation_output_path,
+        )
     else:
         _utils.check_single_category(relocated_gdf)
         if (relocated_gdf.geometry.geom_type != "Point").any():
@@ -113,20 +459,76 @@ def impute(
         lifetimes = imputation["lifetime_years"]
         retirement_delay_years = imputation["retirement_delay_years"]
         scenario = SCENARIO_MAP[imputation["scenario"]]
+        start_year_imputation_method = imputation.get(
+            "start_year_imputation_method",
+            "group_average",
+        )
 
-        # Get facilities within the requested scenario
+        # Get facilities within the requested scenario.
         imputed = relocated_gdf[relocated_gdf["status"].isin(scenario)].copy()
+        original = imputed.copy()
 
         if not imputed.empty:
-            # Adjust project dates
-            imputed["start_year"] = _impute_start_year(imputed, lifetimes)
-            imputed["end_year"] = _impute_end_year(
-                imputed, lifetimes, retirement_delay_years
+            imputed["start_year"], start_year_source_type = _impute_start_year(
+                prepared_df=imputed,
+                lifetimes=lifetimes,
+                method=start_year_imputation_method,
             )
-            # Drop projects with insufficient date data
-            imputed = imputed.dropna(subset=["start_year", "end_year"])
-            # Update the powerplant status
-            imputed["status"] = _impute_status(imputed)
+
+            imputed["end_year"], end_year_source_type = _impute_end_year(
+                imputed,
+                lifetimes,
+                retirement_delay_years,
+            )
+
+            has_complete_dates = imputed[["start_year", "end_year"]].notna().all(
+                axis=1
+            )
+
+            status_final = pd.Series(pd.NA, index=imputed.index, dtype="object")
+
+            if has_complete_dates.any():
+                status_final.loc[has_complete_dates] = _impute_status(
+                    imputed.loc[has_complete_dates]
+                )
+
+            diagnostics = _build_age_imputation_diagnostics(
+                original_df=original,
+                aged_df=imputed,
+                status_final=status_final,
+                start_year_source_type=start_year_source_type,
+                end_year_source_type=end_year_source_type,
+                lifetimes=lifetimes,
+                start_year_imputation_method=start_year_imputation_method,
+            )
+            _save_age_imputation_diagnostics(
+                diagnostics,
+                age_imputation_output_path,
+            )
+
+            # Drop projects with insufficient date data.
+            imputed = imputed.loc[has_complete_dates].copy()
+
+            # Update the powerplant status.
+            imputed["status"] = status_final.loc[imputed.index]
+        else:
+            diagnostics = _build_age_imputation_diagnostics(
+                original_df=original,
+                aged_df=imputed,
+                status_final=pd.Series(pd.NA, index=imputed.index, dtype="object"),
+                start_year_source_type=pd.Series(
+                    pd.NA, index=imputed.index, dtype="object"
+                ),
+                end_year_source_type=pd.Series(
+                    pd.NA, index=imputed.index, dtype="object"
+                ),
+                lifetimes=lifetimes,
+                start_year_imputation_method=start_year_imputation_method,
+            )
+            _save_age_imputation_diagnostics(
+                diagnostics,
+                age_imputation_output_path,
+            )
 
     schema = _schemas.build_schema(technology_mapping, "impute")
     return schema.validate(imputed)
@@ -233,6 +635,7 @@ def main() -> None:
         relocated_gdf=gpd.read_parquet(snakemake.input.relocated),
         imputation=snakemake.params.imputation,
         technology_mapping=snakemake.params.tech_map,
+        age_imputation_output_path=snakemake.output.age_imputation,
     )
     imputed_gdf.to_parquet(snakemake.output.aged)
 
