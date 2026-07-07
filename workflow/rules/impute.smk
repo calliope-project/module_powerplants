@@ -45,6 +45,10 @@ rule impute_location:
 rule impute_time:
     input:
         relocated=rules.impute_location.output.relocated,
+        category_capacity=(
+            "<resources>/automatic/shapes/{shapes}/"
+            "statistics/category_capacity.parquet"
+        ),
     output:
         aged=workflow.pathvars.apply("<powerplants>").format(
             shapes="{shapes}",
