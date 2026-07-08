@@ -25,8 +25,11 @@ SCENARIO_MAP = {
     "pre_construction": HISTORICAL | {"construction", "pre-construction"},
     "announced": HISTORICAL | {"construction", "pre-construction", "announced"},
 }
+# Harmonise powerplant categories with the category names used by the
+# annual reference-capacity dataset.
 REFERENCE_CATEGORY_MAP = {
     "fossil": "fossil fuels",
+    "bioenergy": "biomass and waste",
 }
 
 
@@ -273,10 +276,21 @@ def _complete_capacity_profile(
     # One minus the normalised absolute difference between the target and
     # realised imputed profiles. A value of one indicates an exact match.
     missing_capacity_mw = undated_df["output_capacity_mw"].sum()
-    profile_match = 1.0 - (
+    allocation_match = 1.0 - (
         result["allocation_error_mw"].abs().sum()
         / (2.0 * missing_capacity_mw)
     )
+    final_profile_error_mw = (
+        result["final_mw"] - result["target_final_mw"]
+    )
+
+    total_capacity_mw = result["target_final_mw"].sum()
+
+    final_profile_match = 1.0 - (
+        final_profile_error_mw.abs().sum()
+        / (2.0 * total_capacity_mw)
+    )
+
 
     result["country_id"] = country_id
     result["category"] = category
@@ -284,7 +298,8 @@ def _complete_capacity_profile(
     result["missing_capacity_mw"] = missing_capacity_mw
     result["number_imputed"] = len(undated_df)
     result["years_used"] = assigned_years.nunique()
-    result["profile_match"] = profile_match
+    result["allocation_match"] = allocation_match
+    result["final_profile_match"] = final_profile_match
 
     result.index.name = "year"
 
@@ -307,7 +322,8 @@ def _complete_capacity_profile(
         "missing_capacity_mw",
         "number_imputed",
         "years_used",
-        "profile_match",
+        "allocation_match",
+        "final_profile_match",
         "profile_fallback_used",
         "residual_fallback_used",
     ]
@@ -359,10 +375,13 @@ def _impute_start_years_by_capacity_profile(
         ].copy()
         dated_group["start_year"] = start_year.loc[dated_group.index]
 
-        earliest_allocatable_year =(
+        #this int() is necessary as the subtraction creates a float, was causing errors
+        earliest_allocatable_year = int(
+            (
                 _utils.DATASET_YEAR
                 - lifetime.loc[undated_group.index]
             ).min()
+        )
 
         allocatable_years = pd.Index(
             range(
@@ -372,14 +391,24 @@ def _impute_start_years_by_capacity_profile(
             name="start_year",
         )
 
-        reference_first_year = reference_capacity_df.loc[
-            (reference_capacity_df["country_id"] == country_id)
-            & (reference_capacity_df["category"] == reference_category),
-            "year",
-        ].min()
+        #this int() is necessary, was causing errors
+        reference_first_year = int(
+            reference_capacity_df.loc[
+                (
+                    reference_capacity_df["country_id"]
+                    == country_id
+                )
+                & (
+                    reference_capacity_df["category"]
+                    == reference_category
+                ),
+                "year",
+            ].min()
+        )
 
+        # the int() is necessary, was causing errors
         observed_first_year = (
-            dated_group["start_year"].min()
+            int(dated_group["start_year"].min())
             if not dated_group.empty
             else _utils.DATASET_YEAR
         )
@@ -747,8 +776,8 @@ def plot_age_imputation_profile(
             f"Commissioning-capacity imputation for {display_category}"
         )
 
-        profile_match = country_df["profile_match"].iloc[0]
-        title = f"{country} (match={profile_match:.2f})"
+        final_profile_match = country_df["final_profile_match"].iloc[0]
+        title = f"{country} (match={final_profile_match:.2f})"
 
         ax.set_title(title)
         ax.set_xlabel("Start year")
