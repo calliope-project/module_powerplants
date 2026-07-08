@@ -70,7 +70,7 @@ rule impute_time:
         age_imputation=report(
             "<resources>/automatic/shapes/{shapes}/impute_time/{category}_age_imputation.parquet",
             caption="../report/impute_time_age_imputation.rst",
-            category="Powerplants module", 
+            category="Powerplants module",
             subcategory="{category}",
         ),
         age_profile=(
