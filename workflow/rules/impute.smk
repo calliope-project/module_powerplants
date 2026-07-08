@@ -68,12 +68,20 @@ rule impute_time:
             subcategory="{category}",
         ),
         age_imputation=report(
-            "<resources>/automatic/shapes/{shapes}/impute_time/{category}_age_imputation.csv",
+            "<resources>/automatic/shapes/{shapes}/impute_time/{category}_age_imputation.parquet",
             caption="../report/impute_time_age_imputation.rst",
             category="Powerplants module", 
             subcategory="{category}",
         ),
-        
+        age_profile=(
+            "<resources>/automatic/shapes/{shapes}/impute_time/{category}_age_profile.parquet"
+        ),
+        age_profile_plot=report(
+            "<results>/{shapes}/powerplants/unadjusted/{category}_age_profile.pdf",
+            caption="../report/impute_time_profile.rst",
+            category="Powerplants module",
+            subcategory="{category}",
+        ),
     log:
         "<logs>/{shapes}/{category}/impute_time.log",
     wildcard_constraints:
