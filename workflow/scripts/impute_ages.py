@@ -13,6 +13,8 @@ import numpy as np
 import pandas as pd
 from cmap import Colormap
 from matplotlib import pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 
 if TYPE_CHECKING:
     snakemake: Any
@@ -28,6 +30,38 @@ SCENARIO_MAP = {
 # Harmonise powerplant categories with the category names used by the
 # annual reference-capacity dataset.
 REFERENCE_CATEGORY_MAP = {"fossil": "fossil fuels", "bioenergy": "biomass and waste"}
+
+# formatting preferences for the visualisations
+DATE_SOURCE_LABELS = {
+    "observed": "Observed date",
+    "derived_from_end_year": "Start derived from end year",
+    "imputed_capacity_profile": "Commissioning profile",
+    "derived_from_imputed_retirement_end_year": (
+        "Start derived from retirement profile"
+    ),
+    "derived_from_start_year_lifetime": "End derived from lifetime",
+    "derived_from_start_year_lifetime_capped_to_retired_status": (
+        "Lifetime end capped as retired"
+    ),
+    "derived_from_start_year_lifetime_with_retirement_delay": (
+        "Lifetime end with retirement delay"
+    ),
+    "observed_adjusted_with_retirement_delay": (
+        "Observed end with retirement delay"
+    ),
+    "imputed_retirement_capacity_profile": "Retirement profile",
+}
+DATE_SOURCE_ORDER = [
+    "observed",
+    "derived_from_end_year",
+    "imputed_capacity_profile",
+    "derived_from_imputed_retirement_end_year",
+    "derived_from_start_year_lifetime",
+    "derived_from_start_year_lifetime_capped_to_retired_status",
+    "derived_from_start_year_lifetime_with_retirement_delay",
+    "observed_adjusted_with_retirement_delay",
+    "imputed_retirement_capacity_profile",
+]
 
 
 def _initial_year_source_type(year: pd.Series) -> pd.Series:
@@ -891,6 +925,109 @@ def _build_age_imputation_diagnostics(
 
     return diagnostics.reset_index(drop=True)
 
+CAPACITY_DATE_EVENT_COLUMNS = [
+    "powerplant_id",
+    "name",
+    "country_id",
+    "category",
+    "technology",
+    "status_original",
+    "status_final",
+    "year",
+    "event_type",
+    "source_type",
+    "source_label",
+    "output_capacity_mw",
+    "capacity_change_mw",
+]
+
+
+def _build_capacity_date_events(
+    diagnostics: pd.DataFrame,
+) -> pd.DataFrame:
+    """Convert plant dates into annual commissioning and retirement events."""
+    if diagnostics.empty:
+        return pd.DataFrame(columns=CAPACITY_DATE_EVENT_COLUMNS)
+
+    retained = diagnostics.loc[
+        diagnostics["retained_after_time_imputation"]
+    ].copy()
+
+    if retained.empty:
+        return pd.DataFrame(columns=CAPACITY_DATE_EVENT_COLUMNS)
+
+    common_cols = [
+        "powerplant_id",
+        "name",
+        "country_id",
+        "category",
+        "technology",
+        "status_original",
+        "status_final",
+        "output_capacity_mw",
+    ]
+
+    start_events = retained[
+        common_cols
+        + [
+            "start_year",
+            "start_year_source_type",
+        ]
+    ].rename(
+        columns={
+            "start_year": "year",
+            "start_year_source_type": "source_type",
+        }
+    )
+    start_events["event_type"] = "commissioning"
+    start_events["capacity_change_mw"] = (
+        start_events["output_capacity_mw"]
+    )
+
+    end_events = retained[
+        common_cols
+        + [
+            "end_year",
+            "end_year_source_type",
+        ]
+    ].rename(
+        columns={
+            "end_year": "year",
+            "end_year_source_type": "source_type",
+        }
+    )
+    end_events["event_type"] = "retirement"
+    end_events["capacity_change_mw"] = (
+        -end_events["output_capacity_mw"]
+    )
+
+    events = pd.concat(
+        [
+            start_events,
+            end_events,
+        ],
+        ignore_index=True,
+    )
+
+    events["source_label"] = (
+        events["source_type"]
+        .map(DATE_SOURCE_LABELS)
+        .fillna(events["source_type"])
+    )
+
+    return (
+        events[CAPACITY_DATE_EVENT_COLUMNS]
+        .sort_values(
+            [
+                "country_id",
+                "year",
+                "event_type",
+                "source_type",
+                "powerplant_id",
+            ]
+        )
+        .reset_index(drop=True)
+    )
 
 def _save_age_imputation_diagnostics(
     diagnostics: pd.DataFrame, output_path_str: str
@@ -912,34 +1049,86 @@ def _save_age_profile_diagnostics(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     diagnostics.to_parquet(output_path, index=False)
 
+def _save_capacity_date_events(
+    events: pd.DataFrame,
+    output_path_str: str,
+) -> None:
+    """Save annual capacity-date events."""
+    output_path = Path(output_path_str)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    events.to_parquet(output_path, index=False)
 
-def plot_age_imputation_profile(profile_df: pd.DataFrame, output_path: str, cat: str):
-    """Plot annual commissioning-capacity imputation profile.
+def plot_capacity_date_events(
+    events_df: pd.DataFrame,
+    commissioning_profile_df: pd.DataFrame,
+    retirement_profile_df: pd.DataFrame,
+    output_path: str,
+    cat: str,
+) -> None:
+    """Plot commissioning and retirement events by date-source method."""
+    display_category = cat.replace("_", " ")
+    suptitle = f"Capacity-date imputation for {display_category}"
 
-    Bars show observed and imputed commissioning capacity by year.
-    The line shows the target commissioning profile used for allocation.
-    """
-    suptitle = f"Commissioning-capacity imputation for {cat}"
+    country_sets = []
 
-    if profile_df.empty:
+    for dataframe in [
+        events_df,
+        commissioning_profile_df,
+        retirement_profile_df,
+    ]:
+        if not dataframe.empty:
+            country_sets.extend(
+                dataframe["country_id"].dropna().unique()
+            )
+
+    countries = sorted(set(country_sets))
+
+    if not countries:
         _plots.plot_empty(suptitle, output_path)
         return
 
-    countries = sorted(profile_df["country_id"].dropna().unique())
+    present_source_types = (
+        events_df["source_type"]
+        .dropna()
+        .unique()
+        .tolist()
+    )
+
+    source_types = [
+        source_type
+        for source_type in DATE_SOURCE_ORDER
+        if source_type in present_source_types
+    ]
+
+    source_types.extend(
+        sorted(
+            set(present_source_types)
+            - set(source_types)
+        )
+    )
+
+    cmap = Colormap("seaborn:tab20").to_mpl()
+    color_positions = np.linspace(
+        0,
+        1,
+        max(len(source_types), 1),
+    )
+    source_colors = {
+        source_type: cmap(position)
+        for source_type, position in zip(
+            source_types,
+            color_positions,
+        )
+    }
+
     n_countries = len(countries)
     cols = 2 if n_countries > 1 else 1
     rows = math.ceil(n_countries / cols)
 
-    cmap = Colormap("seaborn:tab20").to_mpl()
-    observed_color = cmap(0)
-    imputed_color = cmap(1)
-    # Dark grey keeps the target distinct from both bar series.
-    target_color = "0.2"
-
     fig, axes = plt.subplots(
         rows,
         cols,
-        figsize=(cols * 6, rows * 4),
+        figsize=(cols * 7, rows * 4.5),
         sharex=False,
         sharey=False,
         constrained_layout=True,
@@ -947,45 +1136,189 @@ def plot_age_imputation_profile(profile_df: pd.DataFrame, output_path: str, cat:
     axes_flat = np.array(axes).ravel()
 
     for ax, country in zip(axes_flat, countries):
-        country_df = (
-            profile_df.loc[profile_df["country_id"] == country]
-            .sort_values("year")
-            .copy()
+        country_events = events_df.loc[
+            events_df["country_id"].eq(country)
+        ].copy()
+
+        commissioning_target = commissioning_profile_df.loc[
+            commissioning_profile_df["country_id"].eq(country)
+        ].copy()
+
+        retirement_target = retirement_profile_df.loc[
+            retirement_profile_df["country_id"].eq(country)
+        ].copy()
+
+        year_values = set(
+            country_events["year"]
+            .dropna()
+            .astype(int)
+        )
+        year_values.update(
+            commissioning_target["year"]
+            .dropna()
+            .astype(int)
+        )
+        year_values.update(
+            retirement_target["year"]
+            .dropna()
+            .astype(int)
         )
 
-        years = country_df["year"].to_numpy()
-        observed = country_df["observed_mw"].to_numpy()
-        imputed = country_df["imputed_mw"].to_numpy()
-        target = country_df["target_final_mw"].to_numpy()
+        years = np.array(sorted(year_values))
 
-        ax.bar(years, observed, label="Observed", color=observed_color)
-        ax.bar(years, imputed, bottom=observed, label="Imputed", color=imputed_color)
-        ax.plot(years, target, label="Target profile", color=target_color, linewidth=2)
+        if len(years) == 0:
+            _plots.draw_empty(
+                ax,
+                country,
+                f"No date events for {country}",
+            )
+            continue
 
-        display_category = cat.replace("_", " ")
-        suptitle = f"Commissioning-capacity imputation for {display_category}"
+        country_events["year"] = (
+            country_events["year"].astype(int)
+        )
 
-        final_profile_match = country_df["final_profile_match"].iloc[0]
-        title = f"{country} (match={final_profile_match:.2f})"
+        annual_events = (
+            country_events.groupby(
+                [
+                    "year",
+                    "event_type",
+                    "source_type",
+                ],
+                as_index=False,
+            )["capacity_change_mw"]
+            .sum()
+        )
 
-        ax.set_title(title)
-        ax.set_xlabel("Start year")
-        ax.set_ylabel("Capacity (MW)")
+        positive_bottom = np.zeros(len(years))
+        negative_bottom = np.zeros(len(years))
+
+        for source_type in source_types:
+            commissioning_values = (
+                annual_events.loc[
+                    annual_events["source_type"].eq(source_type)
+                    & annual_events["event_type"].eq("commissioning")
+                ]
+                .set_index("year")["capacity_change_mw"]
+                .reindex(years, fill_value=0.0)
+                .to_numpy()
+            )
+
+            retirement_values = (
+                annual_events.loc[
+                    annual_events["source_type"].eq(source_type)
+                    & annual_events["event_type"].eq("retirement")
+                ]
+                .set_index("year")["capacity_change_mw"]
+                .reindex(years, fill_value=0.0)
+                .to_numpy()
+            )
+
+            if commissioning_values.any():
+                ax.bar(
+                    years,
+                    commissioning_values,
+                    bottom=positive_bottom,
+                    color=source_colors[source_type],
+                    width=0.9,
+                )
+
+            if retirement_values.any():
+                ax.bar(
+                    years,
+                    retirement_values,
+                    bottom=negative_bottom,
+                    color=source_colors[source_type],
+                    width=0.9,
+                )
+
+            positive_bottom += commissioning_values
+            negative_bottom += retirement_values
+
+        if not commissioning_target.empty:
+            commissioning_target = (
+                commissioning_target.sort_values("year")
+            )
+
+            ax.plot(
+                commissioning_target["year"],
+                commissioning_target["target_final_mw"],
+                color="0.15",
+                linewidth=2,
+            )
+
+        if not retirement_target.empty:
+            retirement_target = (
+                retirement_target.sort_values("year")
+            )
+
+            ax.plot(
+                retirement_target["year"],
+                -retirement_target["target_final_mw"],
+                color="0.15",
+                linewidth=2,
+                linestyle="--",
+            )
+
+        ax.axhline(
+            0,
+            color="0.35",
+            linewidth=0.8,
+        )
+        ax.set_title(country)
+        ax.set_xlabel("Year")
+        ax.set_ylabel("Annual capacity event (MW)")
+        ax.locator_params(axis="x", nbins=12)
         ax.tick_params(axis="x", rotation=45)
         ax.minorticks_off()
 
     for ax in axes_flat[n_countries:]:
         ax.set_visible(False)
 
-    handles, labels = axes_flat[0].get_legend_handles_labels()
+    legend_handles = [
+        Patch(
+            facecolor=source_colors[source_type],
+            label=DATE_SOURCE_LABELS.get(
+                source_type,
+                source_type,
+            ),
+        )
+        for source_type in source_types
+    ]
+
+    if not commissioning_profile_df.empty:
+        legend_handles.append(
+            Line2D(
+                [0],
+                [0],
+                color="0.15",
+                linewidth=2,
+                label="Commissioning target",
+            )
+        )
+
+    if not retirement_profile_df.empty:
+        legend_handles.append(
+            Line2D(
+                [0],
+                [0],
+                color="0.15",
+                linewidth=2,
+                linestyle="--",
+                label="Retirement target",
+            )
+        )
+
     fig.legend(
-        handles, labels, loc="center left", bbox_to_anchor=(1.0, 0.5), frameon=False
+        handles=legend_handles,
+        loc="center left",
+        bbox_to_anchor=(1.0, 0.5),
+        frameon=False,
     )
     fig.suptitle(suptitle, fontsize=14)
 
     fig.savefig(output_path, bbox_inches="tight")
     plt.close(fig)
-
 
 def impute(
     relocated_gdf: gpd.GeoDataFrame,
@@ -1229,6 +1562,19 @@ def main() -> None:
     )
     imputed_gdf.to_parquet(snakemake.output.aged)
 
+    age_diagnostics_df = pd.read_parquet(
+        snakemake.output.age_imputation
+    )
+
+    capacity_date_events_df = _build_capacity_date_events(
+        age_diagnostics_df
+    )
+
+    _save_capacity_date_events(
+        capacity_date_events_df,
+        snakemake.output.capacity_date_events,
+    )
+
     plot_powerplant_capacity_buildup(
         imputed_gdf,
         snakemake.output.histogram,
@@ -1237,9 +1583,19 @@ def main() -> None:
     )
     explore(imputed_gdf, snakemake.output.explorer)
 
-    age_profile_df = pd.read_parquet(snakemake.output.age_profile)
-    plot_age_imputation_profile(
-        age_profile_df, snakemake.output.age_profile_plot, snakemake.wildcards.category
+    commissioning_profile_df = pd.read_parquet(
+        snakemake.output.age_profile
+    )
+    retirement_profile_df = pd.read_parquet(
+        snakemake.output.retirement_profile
+    )
+
+    plot_capacity_date_events(
+        events_df=capacity_date_events_df,
+        commissioning_profile_df=commissioning_profile_df,
+        retirement_profile_df=retirement_profile_df,
+        output_path=snakemake.output.capacity_date_plot,
+        cat=snakemake.wildcards.category,
     )
 
 
