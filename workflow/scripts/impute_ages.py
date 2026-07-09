@@ -27,10 +27,7 @@ SCENARIO_MAP = {
 }
 # Harmonise powerplant categories with the category names used by the
 # annual reference-capacity dataset.
-REFERENCE_CATEGORY_MAP = {
-    "fossil": "fossil fuels",
-    "bioenergy": "biomass and waste",
-}
+REFERENCE_CATEGORY_MAP = {"fossil": "fossil fuels", "bioenergy": "biomass and waste"}
 
 
 def _initial_year_source_type(year: pd.Series) -> pd.Series:
@@ -64,19 +61,14 @@ def _build_reference_addition_profile(
     # not contribute commissioning weight hence clipped to 0.
     reference_stock = capacity_stock.reindex(years)
     reference_positive_change = (
-        capacity_stock.diff()
-        .clip(lower=0.0)
-        .reindex(years)
-        .fillna(0.0)
+        capacity_stock.diff().clip(lower=0.0).reindex(years).fillna(0.0)
     )
 
     profile_basis = reference_positive_change.copy()
 
     if smoothing_window > 1:
         profile_basis = profile_basis.rolling(
-            window=smoothing_window,
-            center=True,
-            min_periods=1,
+            window=smoothing_window, center=True, min_periods=1
         ).mean()
 
     profile_fallback_used = profile_basis.sum() <= 0
@@ -97,11 +89,9 @@ def _build_reference_addition_profile(
 
     return profile
 
+
 def _build_reference_retirement_profile(
-    reference_capacity_df: pd.DataFrame,
-    country_id: str,
-    category: str,
-    years: pd.Index,
+    reference_capacity_df: pd.DataFrame, country_id: str, category: str, years: pd.Index
 ) -> pd.DataFrame:
     """Build an annual retirement profile from capacity-stock reductions."""
     capacity_stock = (
@@ -120,8 +110,8 @@ def _build_reference_retirement_profile(
     # Negative annual stock changes provide the retirement profile.
     # Positive changes represent net additions and carry no retirement weight.
     reference_negative_change = (
-        -capacity_stock.diff()
-    ).clip(lower=0.0).reindex(years).fillna(0.0)
+        (-capacity_stock.diff()).clip(lower=0.0).reindex(years).fillna(0.0)
+    )
 
     profile_basis = reference_negative_change.copy()
     profile_fallback_used = profile_basis.sum() <= 0
@@ -134,15 +124,14 @@ def _build_reference_retirement_profile(
             "reference_stock_mw": reference_stock,
             "reference_negative_change_mw": reference_negative_change,
             "reference_profile_basis_mw": profile_basis,
-            "reference_profile_weight": (
-                profile_basis / profile_basis.sum()
-            ),
+            "reference_profile_weight": (profile_basis / profile_basis.sum()),
         },
         index=years,
     )
     profile["profile_fallback_used"] = profile_fallback_used
 
     return profile
+
 
 def _build_clipped_residual_profile(
     dated_df: pd.DataFrame,
@@ -165,12 +154,8 @@ def _build_clipped_residual_profile(
     total_capacity_mw = observed_capacity.sum() + missing_capacity_mw
 
     result["observed_mw"] = observed_capacity
-    result["target_final_mw"] = (
-        result["reference_profile_weight"] * total_capacity_mw
-    )
-    result["raw_residual_mw"] = (
-        result["target_final_mw"] - result["observed_mw"]
-    )
+    result["target_final_mw"] = result["reference_profile_weight"] * total_capacity_mw
+    result["raw_residual_mw"] = result["target_final_mw"] - result["observed_mw"]
 
     # Observed dates remain fixed. Years that already exceed the scaled
     # target therefore receive no additional imputed capacity.
@@ -184,38 +169,24 @@ def _build_clipped_residual_profile(
 
     if residual_fallback_used:
         residual_target = result["reference_profile_weight"].reindex(
-            allocatable_years,
-            fill_value=0.0,
+            allocatable_years, fill_value=0.0
         )
 
     if residual_target.sum() <= 0:
-        residual_target = pd.Series(
-            1.0,
-            index=allocatable_years,
-            dtype=float,
-        )
+        residual_target = pd.Series(1.0, index=allocatable_years, dtype=float)
 
     # Rescale the feasible residual so that all missing plant capacity is
     # allocated while preserving its relative annual shape.
-    residual_target = (
-        residual_target
-        / residual_target.sum()
-        * missing_capacity_mw
-    )
+    residual_target = residual_target / residual_target.sum() * missing_capacity_mw
 
-    result["residual_target_mw"] = residual_target.reindex(
-        result.index,
-        fill_value=0.0,
-    )
+    result["residual_target_mw"] = residual_target.reindex(result.index, fill_value=0.0)
     result["residual_fallback_used"] = residual_fallback_used
 
     return result
 
 
 def _allocate_start_years_by_residual_target(
-    undated_df: pd.DataFrame,
-    residual_target: pd.Series,
-    lifetimes: dict[str, int],
+    undated_df: pd.DataFrame, residual_target: pd.Series, lifetimes: dict[str, int]
 ) -> pd.Series:
     """Assign whole plants to feasible years with the largest deficits.
 
@@ -224,9 +195,8 @@ def _allocate_start_years_by_residual_target(
     because they are harder to fit into the residual target.
     """
     capacities = undated_df["output_capacity_mw"]
-    earliest_feasible_year = (
-        _utils.DATASET_YEAR
-        - undated_df["technology"].map(lifetimes)
+    earliest_feasible_year = _utils.DATASET_YEAR - undated_df["technology"].map(
+        lifetimes
     )
 
     # Allocate the least flexible plants first, then the largest capacity
@@ -240,21 +210,12 @@ def _allocate_start_years_by_residual_target(
         },
         index=undated_df.index,
     ).sort_values(
-        [
-            "earliest_feasible_year",
-            "capacity",
-            "powerplant_id",
-            "row_order",
-        ],
+        ["earliest_feasible_year", "capacity", "powerplant_id", "row_order"],
         ascending=[False, False, True, True],
     )
 
     remaining_target = residual_target.copy()
-    assigned_years = pd.Series(
-        np.nan,
-        index=undated_df.index,
-        dtype=float,
-    )
+    assigned_years = pd.Series(np.nan, index=undated_df.index, dtype=float)
 
     for plant_index in order.index:
         plant = undated_df.loc[plant_index]
@@ -289,38 +250,25 @@ def _allocate_start_years_by_residual_target(
 
     return assigned_years
 
+
 def _allocate_end_years_by_residual_target(
-    undated_df: pd.DataFrame,
-    residual_target: pd.Series,
+    undated_df: pd.DataFrame, residual_target: pd.Series
 ) -> pd.Series:
     """Assign whole retired plants to years with the largest deficits."""
     order = (
-        undated_df[
-            ["output_capacity_mw", "powerplant_id"]
-        ]
+        undated_df[["output_capacity_mw", "powerplant_id"]]
         .assign(row_order=np.arange(len(undated_df)))
         .sort_values(
-            [
-                "output_capacity_mw",
-                "powerplant_id",
-                "row_order",
-            ],
+            ["output_capacity_mw", "powerplant_id", "row_order"],
             ascending=[False, True, True],
         )
     )
 
     remaining_target = residual_target.copy()
-    assigned_years = pd.Series(
-        np.nan,
-        index=undated_df.index,
-        dtype=float,
-    )
+    assigned_years = pd.Series(np.nan, index=undated_df.index, dtype=float)
 
     for plant_index in order.index:
-        plant_capacity = undated_df.loc[
-            plant_index,
-            "output_capacity_mw",
-        ]
+        plant_capacity = undated_df.loc[plant_index, "output_capacity_mw"]
 
         target_ranking = pd.DataFrame(
             {
@@ -338,6 +286,7 @@ def _allocate_end_years_by_residual_target(
         remaining_target.loc[assigned_year] -= plant_capacity
 
     return assigned_years
+
 
 def _complete_capacity_profile(
     profile: pd.DataFrame,
@@ -365,28 +314,21 @@ def _complete_capacity_profile(
     result = profile.copy()
     result["imputed_mw"] = imputed_capacity
     result["final_mw"] = result["observed_mw"] + result["imputed_mw"]
-    result["allocation_error_mw"] = (
-        result["imputed_mw"] - result["residual_target_mw"]
-    )
+    result["allocation_error_mw"] = result["imputed_mw"] - result["residual_target_mw"]
 
     # One minus the normalised absolute difference between the target and
     # realised imputed profiles. A value of one indicates an exact match.
     missing_capacity_mw = undated_df["output_capacity_mw"].sum()
     allocation_match = 1.0 - (
-        result["allocation_error_mw"].abs().sum()
-        / (2.0 * missing_capacity_mw)
+        result["allocation_error_mw"].abs().sum() / (2.0 * missing_capacity_mw)
     )
-    final_profile_error_mw = (
-        result["final_mw"] - result["target_final_mw"]
-    )
+    final_profile_error_mw = result["final_mw"] - result["target_final_mw"]
 
     total_capacity_mw = result["target_final_mw"].sum()
 
     final_profile_match = 1.0 - (
-        final_profile_error_mw.abs().sum()
-        / (2.0 * total_capacity_mw)
+        final_profile_error_mw.abs().sum() / (2.0 * total_capacity_mw)
     )
-
 
     result["country_id"] = country_id
     result["category"] = category
@@ -426,6 +368,7 @@ def _complete_capacity_profile(
 
     return result.reset_index()[column_order]
 
+
 def _complete_retirement_profile(
     profile: pd.DataFrame,
     undated_df: pd.DataFrame,
@@ -452,25 +395,19 @@ def _complete_retirement_profile(
     result = profile.copy()
     result["imputed_mw"] = imputed_capacity
     result["final_mw"] = result["observed_mw"] + result["imputed_mw"]
-    result["allocation_error_mw"] = (
-        result["imputed_mw"] - result["residual_target_mw"]
-    )
+    result["allocation_error_mw"] = result["imputed_mw"] - result["residual_target_mw"]
 
     missing_capacity_mw = undated_df["output_capacity_mw"].sum()
 
     allocation_match = 1.0 - (
-        result["allocation_error_mw"].abs().sum()
-        / (2.0 * missing_capacity_mw)
+        result["allocation_error_mw"].abs().sum() / (2.0 * missing_capacity_mw)
     )
 
-    final_profile_error_mw = (
-        result["final_mw"] - result["target_final_mw"]
-    )
+    final_profile_error_mw = result["final_mw"] - result["target_final_mw"]
     total_capacity_mw = result["target_final_mw"].sum()
 
     final_profile_match = 1.0 - (
-        final_profile_error_mw.abs().sum()
-        / (2.0 * total_capacity_mw)
+        final_profile_error_mw.abs().sum() / (2.0 * total_capacity_mw)
     )
 
     result["country_id"] = country_id
@@ -512,6 +449,7 @@ def _complete_retirement_profile(
 
     return result.reset_index()[column_order]
 
+
 def _impute_start_years_by_capacity_profile(
     prepared_df: pd.DataFrame,
     reference_capacity_df: pd.DataFrame,
@@ -522,24 +460,16 @@ def _impute_start_years_by_capacity_profile(
     start_year = prepared_df["start_year"].copy()
     lifetime = prepared_df["technology"].map(lifetimes)
 
-    result = pd.Series(
-        np.nan,
-        index=prepared_df.index,
-        dtype=float,
-    )
+    result = pd.Series(np.nan, index=prepared_df.index, dtype=float)
     profiles = []
 
-    missing_mask = (
-        start_year.isna()
-        & prepared_df["status"].isin(CURRENT)
-    )
+    missing_mask = start_year.isna() & prepared_df["status"].isin(CURRENT)
 
     if not missing_mask.any():
         return result, pd.DataFrame()
 
     grouped_missing = prepared_df.loc[missing_mask].groupby(
-        ["country_id", "category"],
-        dropna=False,
+        ["country_id", "category"], dropna=False
     )
 
     for (country_id, category), undated_group in grouped_missing:
@@ -551,38 +481,23 @@ def _impute_start_years_by_capacity_profile(
             & prepared_df["status"].isin(HISTORICAL)
         )
 
-        dated_group = prepared_df.loc[
-            group_mask & start_year.notna()
-        ].copy()
+        dated_group = prepared_df.loc[group_mask & start_year.notna()].copy()
         dated_group["start_year"] = start_year.loc[dated_group.index]
 
-        #this int() is necessary as the subtraction creates a float, was causing errors
+        # this int() is necessary as the subtraction creates a float, was causing errors
         earliest_allocatable_year = int(
-            (
-                _utils.DATASET_YEAR
-                - lifetime.loc[undated_group.index]
-            ).min()
+            (_utils.DATASET_YEAR - lifetime.loc[undated_group.index]).min()
         )
 
         allocatable_years = pd.Index(
-            range(
-                earliest_allocatable_year,
-                _utils.DATASET_YEAR + 1,
-            ),
-            name="start_year",
+            range(earliest_allocatable_year, _utils.DATASET_YEAR + 1), name="start_year"
         )
 
-        #this int() is necessary, was causing errors
+        # this int() is necessary, was causing errors
         reference_first_year = int(
             reference_capacity_df.loc[
-                (
-                    reference_capacity_df["country_id"]
-                    == country_id
-                )
-                & (
-                    reference_capacity_df["category"]
-                    == reference_category
-                ),
+                (reference_capacity_df["country_id"] == country_id)
+                & (reference_capacity_df["category"] == reference_category),
                 "year",
             ].min()
         )
@@ -595,17 +510,11 @@ def _impute_start_years_by_capacity_profile(
         )
 
         first_profile_year = min(
-                reference_first_year,
-                observed_first_year,
-                earliest_allocatable_year,
-            )
+            reference_first_year, observed_first_year, earliest_allocatable_year
+        )
 
         profile_years = pd.Index(
-            range(
-                first_profile_year,
-                _utils.DATASET_YEAR + 1,
-            ),
-            name="start_year",
+            range(first_profile_year, _utils.DATASET_YEAR + 1), name="start_year"
         )
 
         reference_profile = _build_reference_addition_profile(
@@ -623,7 +532,7 @@ def _impute_start_years_by_capacity_profile(
             profile=reference_profile,
             allocatable_years=allocatable_years,
             missing_capacity_mw=missing_capacity_mw,
-            year_col="start_year"
+            year_col="start_year",
         )
 
         assigned_years = _allocate_start_years_by_residual_target(
@@ -645,12 +554,10 @@ def _impute_start_years_by_capacity_profile(
             )
         )
 
-    profile_diagnostics = pd.concat(
-        profiles,
-        ignore_index=True,
-    )
+    profile_diagnostics = pd.concat(profiles, ignore_index=True)
 
     return result, profile_diagnostics
+
 
 def _impute_retired_dates_by_capacity_profile(
     prepared_df: pd.DataFrame,
@@ -658,16 +565,8 @@ def _impute_retired_dates_by_capacity_profile(
     lifetimes: dict[str, int],
 ) -> tuple[pd.Series, pd.Series, pd.DataFrame]:
     """Impute dates for retired plants with neither date available."""
-    imputed_start_year = pd.Series(
-        np.nan,
-        index=prepared_df.index,
-        dtype=float,
-    )
-    imputed_end_year = pd.Series(
-        np.nan,
-        index=prepared_df.index,
-        dtype=float,
-    )
+    imputed_start_year = pd.Series(np.nan, index=prepared_df.index, dtype=float)
+    imputed_end_year = pd.Series(np.nan, index=prepared_df.index, dtype=float)
     profiles = []
 
     missing_mask = (
@@ -677,22 +576,14 @@ def _impute_retired_dates_by_capacity_profile(
     )
 
     if not missing_mask.any():
-        return (
-            imputed_start_year,
-            imputed_end_year,
-            pd.DataFrame(),
-        )
+        return (imputed_start_year, imputed_end_year, pd.DataFrame())
 
     grouped_missing = prepared_df.loc[missing_mask].groupby(
-        ["country_id", "category"],
-        dropna=False,
+        ["country_id", "category"], dropna=False
     )
 
     for (country_id, category), undated_group in grouped_missing:
-        reference_category = REFERENCE_CATEGORY_MAP.get(
-            category,
-            category,
-        )
+        reference_category = REFERENCE_CATEGORY_MAP.get(category, category)
 
         group_mask = (
             prepared_df["country_id"].eq(country_id)
@@ -706,18 +597,9 @@ def _impute_retired_dates_by_capacity_profile(
 
         reference_first_year = int(
             reference_capacity_df.loc[
-                (
-                    reference_capacity_df["country_id"]
-                    == country_id
-                )
-                & (
-                    reference_capacity_df["category"]
-                    == reference_category
-                )
-                & (
-                    reference_capacity_df["year"]
-                    < _utils.DATASET_YEAR
-                ),
+                (reference_capacity_df["country_id"] == country_id)
+                & (reference_capacity_df["category"] == reference_category)
+                & (reference_capacity_df["year"] < _utils.DATASET_YEAR),
                 "year",
             ].min()
         )
@@ -728,27 +610,16 @@ def _impute_retired_dates_by_capacity_profile(
             else reference_first_year
         )
 
-        first_profile_year = min(
-            reference_first_year,
-            observed_first_year,
-        )
+        first_profile_year = min(reference_first_year, observed_first_year)
 
         profile_years = pd.Index(
-            range(
-                first_profile_year,
-                _utils.DATASET_YEAR,
-            ),
-            name="end_year",
+            range(first_profile_year, _utils.DATASET_YEAR), name="end_year"
         )
 
         # Missing retirements are allocated only within the period covered
         # by the reference capacity series.
         allocatable_years = pd.Index(
-            range(
-                reference_first_year,
-                _utils.DATASET_YEAR,
-            ),
-            name="end_year",
+            range(reference_first_year, _utils.DATASET_YEAR), name="end_year"
         )
 
         reference_profile = _build_reference_retirement_profile(
@@ -774,8 +645,7 @@ def _impute_retired_dates_by_capacity_profile(
                     observed_retirement_basis
                 )
                 reference_profile["reference_profile_weight"] = (
-                    observed_retirement_basis
-                    / observed_retirement_basis.sum()
+                    observed_retirement_basis / observed_retirement_basis.sum()
                 )
                 reference_profile["profile_source"] = "observed_retirements"
 
@@ -794,26 +664,17 @@ def _impute_retired_dates_by_capacity_profile(
             year_col="end_year",
         )
 
-        assigned_end_years = (
-            _allocate_end_years_by_residual_target(
-                undated_df=undated_group,
-                residual_target=allocation_profile[
-                    "residual_target_mw"
-                ],
-            )
+        assigned_end_years = _allocate_end_years_by_residual_target(
+            undated_df=undated_group,
+            residual_target=allocation_profile["residual_target_mw"],
         )
 
-        assigned_start_years = (
-            assigned_end_years
-            - undated_group["technology"].map(lifetimes)
+        assigned_start_years = assigned_end_years - undated_group["technology"].map(
+            lifetimes
         )
 
-        imputed_end_year.loc[undated_group.index] = (
-            assigned_end_years
-        )
-        imputed_start_year.loc[undated_group.index] = (
-            assigned_start_years
-        )
+        imputed_end_year.loc[undated_group.index] = assigned_end_years
+        imputed_start_year.loc[undated_group.index] = assigned_start_years
 
         profiles.append(
             _complete_retirement_profile(
@@ -826,20 +687,13 @@ def _impute_retired_dates_by_capacity_profile(
             )
         )
 
-    retirement_profiles = pd.concat(
-        profiles,
-        ignore_index=True,
-    )
+    retirement_profiles = pd.concat(profiles, ignore_index=True)
 
-    return (
-        imputed_start_year,
-        imputed_end_year,
-        retirement_profiles,
-    )
+    return (imputed_start_year, imputed_end_year, retirement_profiles)
+
 
 def _impute_start_years_by_group_average(
-    prepared_df: pd.DataFrame,
-    group_cols: list[str] | None = None,
+    prepared_df: pd.DataFrame, group_cols: list[str] | None = None
 ) -> pd.Series:
     """Impute missing start years using rounded group-average start years."""
     if group_cols is None:
@@ -868,10 +722,7 @@ def _impute_remaining_start_years(
 ) -> tuple[pd.Series, pd.DataFrame]:
     """Impute start years that remain missing after direct backfilling."""
     if method == "group_average":
-        return (
-            _impute_start_years_by_group_average(prepared_df),
-            pd.DataFrame(),
-        )
+        return (_impute_start_years_by_group_average(prepared_df), pd.DataFrame())
 
     if method == "capacity_profile":
         return _impute_start_years_by_capacity_profile(
@@ -900,10 +751,7 @@ def _impute_start_year(
     lifetime = prepared_df["technology"].map(lifetimes)
 
     # First, preserve the direct deterministic backfill from known end year.
-    direct_backfill_mask = (
-        start_year.isna()
-        & prepared_df["end_year"].notna()
-    )
+    direct_backfill_mask = start_year.isna() & prepared_df["end_year"].notna()
     start_year.loc[direct_backfill_mask] = (
         prepared_df.loc[direct_backfill_mask, "end_year"]
         - lifetime.loc[direct_backfill_mask]
@@ -917,19 +765,14 @@ def _impute_start_year(
         imputation_df = prepared_df.copy()
         imputation_df["start_year"] = start_year
 
-        imputed_start_year, profile_diagnostics = (
-            _impute_remaining_start_years(
-                imputation_df,
-                reference_capacity_df=reference_capacity_df,
-                lifetimes=lifetimes,
-                method=method,
-            )
+        imputed_start_year, profile_diagnostics = _impute_remaining_start_years(
+            imputation_df,
+            reference_capacity_df=reference_capacity_df,
+            lifetimes=lifetimes,
+            method=method,
         )
 
-        fallback_imputed_mask = (
-            remaining_missing_mask
-            & imputed_start_year.notna()
-        )
+        fallback_imputed_mask = remaining_missing_mask & imputed_start_year.notna()
 
         start_year.loc[fallback_imputed_mask] = imputed_start_year.loc[
             fallback_imputed_mask
@@ -940,9 +783,7 @@ def _impute_start_year(
 
 
 def _impute_end_year(
-    df: pd.DataFrame,
-    lifetimes: dict[str, int],
-    delay: dict[str, int],
+    df: pd.DataFrame, lifetimes: dict[str, int], delay: dict[str, int]
 ) -> tuple[pd.Series, pd.Series]:
     """Impute end_year using lifetime and track source labels.
 
@@ -958,20 +799,12 @@ def _impute_end_year(
     lifetime_fill_mask = end_year.isna() & expected_end.notna()
     result = end_year.copy()
     result.loc[lifetime_fill_mask] = expected_end.loc[lifetime_fill_mask]
-    end_year_source_type.loc[lifetime_fill_mask] = (
-        "derived_from_start_year_lifetime"
-    )
+    end_year_source_type.loc[lifetime_fill_mask] = "derived_from_start_year_lifetime"
 
     # Cap lifetime-derived end years so that plants recorded as retired
     # end before the dataset year.
-    retired_lifetime_fill_mask = (
-        lifetime_fill_mask
-        & df["status"].eq("retired")
-    )
-    retired_end_capped_mask = (
-        retired_lifetime_fill_mask
-        & result.ge(ref_year)
-    )
+    retired_lifetime_fill_mask = lifetime_fill_mask & df["status"].eq("retired")
+    retired_end_capped_mask = retired_lifetime_fill_mask & result.ge(ref_year)
     result.loc[retired_end_capped_mask] = ref_year - 1
     end_year_source_type.loc[retired_end_capped_mask] = (
         "derived_from_start_year_lifetime_capped_to_retired_status"
@@ -985,13 +818,13 @@ def _impute_end_year(
 
     result.loc[needs_delay] = delayed_end.loc[needs_delay]
 
-    end_year_source_type.loc[
-        needs_delay & lifetime_fill_mask
-    ] = "derived_from_start_year_lifetime_with_retirement_delay"
+    end_year_source_type.loc[needs_delay & lifetime_fill_mask] = (
+        "derived_from_start_year_lifetime_with_retirement_delay"
+    )
 
-    end_year_source_type.loc[
-        needs_delay & ~lifetime_fill_mask
-    ] = "observed_adjusted_with_retirement_delay"
+    end_year_source_type.loc[needs_delay & ~lifetime_fill_mask] = (
+        "observed_adjusted_with_retirement_delay"
+    )
 
     return result, end_year_source_type
 
@@ -1051,8 +884,7 @@ def _build_age_imputation_diagnostics(
 
     # TODO: these source types should be reflected in scripts/_schemas.
     diagnostics["retained_after_time_imputation"] = (
-        diagnostics["start_year"].notna()
-        & diagnostics["end_year"].notna()
+        diagnostics["start_year"].notna() & diagnostics["end_year"].notna()
     )
 
     diagnostics["start_year_imputation_method"] = start_year_imputation_method
@@ -1061,8 +893,7 @@ def _build_age_imputation_diagnostics(
 
 
 def _save_age_imputation_diagnostics(
-    diagnostics: pd.DataFrame,
-    output_path_str: str,
+    diagnostics: pd.DataFrame, output_path_str: str
 ) -> None:
     """Save row-level age-imputation diagnostics if requested."""
     output_path = Path(output_path_str)
@@ -1071,8 +902,7 @@ def _save_age_imputation_diagnostics(
 
 
 def _save_age_profile_diagnostics(
-    diagnostics: pd.DataFrame,
-    output_path_str: str | None,
+    diagnostics: pd.DataFrame, output_path_str: str | None
 ) -> None:
     """Save annual age-imputation profile diagnostics."""
     if output_path_str is None:
@@ -1083,11 +913,7 @@ def _save_age_profile_diagnostics(
     diagnostics.to_parquet(output_path, index=False)
 
 
-def plot_age_imputation_profile(
-    profile_df: pd.DataFrame,
-    output_path: str,
-    cat: str,
-):
+def plot_age_imputation_profile(profile_df: pd.DataFrame, output_path: str, cat: str):
     """Plot annual commissioning-capacity imputation profile.
 
     Bars show observed and imputed commissioning capacity by year.
@@ -1132,31 +958,12 @@ def plot_age_imputation_profile(
         imputed = country_df["imputed_mw"].to_numpy()
         target = country_df["target_final_mw"].to_numpy()
 
-        ax.bar(
-            years,
-            observed,
-            label="Observed",
-            color=observed_color,
-        )
-        ax.bar(
-            years,
-            imputed,
-            bottom=observed,
-            label="Imputed",
-            color=imputed_color,
-        )
-        ax.plot(
-            years,
-            target,
-            label="Target profile",
-            color=target_color,
-            linewidth=2,
-        )
+        ax.bar(years, observed, label="Observed", color=observed_color)
+        ax.bar(years, imputed, bottom=observed, label="Imputed", color=imputed_color)
+        ax.plot(years, target, label="Target profile", color=target_color, linewidth=2)
 
         display_category = cat.replace("_", " ")
-        suptitle = (
-            f"Commissioning-capacity imputation for {display_category}"
-        )
+        suptitle = f"Commissioning-capacity imputation for {display_category}"
 
         final_profile_match = country_df["final_profile_match"].iloc[0]
         title = f"{country} (match={final_profile_match:.2f})"
@@ -1172,16 +979,13 @@ def plot_age_imputation_profile(
 
     handles, labels = axes_flat[0].get_legend_handles_labels()
     fig.legend(
-        handles,
-        labels,
-        loc="center left",
-        bbox_to_anchor=(1.0, 0.5),
-        frameon=False,
+        handles, labels, loc="center left", bbox_to_anchor=(1.0, 0.5), frameon=False
     )
     fig.suptitle(suptitle, fontsize=14)
 
     fig.savefig(output_path, bbox_inches="tight")
     plt.close(fig)
+
 
 def impute(
     relocated_gdf: gpd.GeoDataFrame,
@@ -1205,18 +1009,9 @@ def impute(
     """
     if relocated_gdf.empty:
         imputed = relocated_gdf
-        _save_age_imputation_diagnostics(
-            pd.DataFrame(),
-            age_imputation_output_path,
-        )
-        _save_age_profile_diagnostics(
-            pd.DataFrame(),
-            age_profile_output_path,
-        )
-        _save_age_profile_diagnostics(
-            pd.DataFrame(),
-            retirement_profile_output_path,
-        )
+        _save_age_imputation_diagnostics(pd.DataFrame(), age_imputation_output_path)
+        _save_age_profile_diagnostics(pd.DataFrame(), age_profile_output_path)
+        _save_age_profile_diagnostics(pd.DataFrame(), retirement_profile_output_path)
     else:
         _utils.check_single_category(relocated_gdf)
         if (relocated_gdf.geometry.geom_type != "Point").any():
@@ -1234,21 +1029,17 @@ def impute(
         original = imputed.copy()
 
         if not imputed.empty:
-            (
-                imputed["start_year"],
-                start_year_source_type,
-                profile_diagnostics,
-            ) = _impute_start_year(
-                prepared_df=imputed,
-                reference_capacity_df=reference_capacity_df,
-                lifetimes=lifetimes,
-                method=start_year_imputation_method,
+            (imputed["start_year"], start_year_source_type, profile_diagnostics) = (
+                _impute_start_year(
+                    prepared_df=imputed,
+                    reference_capacity_df=reference_capacity_df,
+                    lifetimes=lifetimes,
+                    method=start_year_imputation_method,
+                )
             )
 
             imputed["end_year"], end_year_source_type = _impute_end_year(
-                imputed,
-                lifetimes,
-                retirement_delay_years,
+                imputed, lifetimes, retirement_delay_years
             )
 
             retired_start_year, retired_end_year, retirement_profile_diagnostics = (
@@ -1260,21 +1051,18 @@ def impute(
             )
 
             _save_age_profile_diagnostics(
-                retirement_profile_diagnostics,
-                retirement_profile_output_path,
+                retirement_profile_diagnostics, retirement_profile_output_path
             )
 
             retirement_imputed_mask = retired_end_year.notna()
 
-            imputed.loc[
-                retirement_imputed_mask,
-                "start_year",
-            ] = retired_start_year.loc[retirement_imputed_mask]
+            imputed.loc[retirement_imputed_mask, "start_year"] = retired_start_year.loc[
+                retirement_imputed_mask
+            ]
 
-            imputed.loc[
-                retirement_imputed_mask,
-                "end_year",
-            ] = retired_end_year.loc[retirement_imputed_mask]
+            imputed.loc[retirement_imputed_mask, "end_year"] = retired_end_year.loc[
+                retirement_imputed_mask
+            ]
 
             start_year_source_type.loc[retirement_imputed_mask] = (
                 "derived_from_imputed_retirement_end_year"
@@ -1283,9 +1071,7 @@ def impute(
                 "imputed_retirement_capacity_profile"
             )
 
-            has_complete_dates = imputed[["start_year", "end_year"]].notna().all(
-                axis=1
-            )
+            has_complete_dates = imputed[["start_year", "end_year"]].notna().all(axis=1)
 
             status_final = pd.Series(pd.NA, index=imputed.index, dtype="object")
 
@@ -1303,14 +1089,8 @@ def impute(
                 lifetimes=lifetimes,
                 start_year_imputation_method=start_year_imputation_method,
             )
-            _save_age_imputation_diagnostics(
-                diagnostics,
-                age_imputation_output_path,
-            )
-            _save_age_profile_diagnostics(
-                profile_diagnostics,
-                age_profile_output_path,
-            )
+            _save_age_imputation_diagnostics(diagnostics, age_imputation_output_path)
+            _save_age_profile_diagnostics(profile_diagnostics, age_profile_output_path)
 
             # Drop projects with insufficient date data.
             imputed = imputed.loc[has_complete_dates].copy()
@@ -1323,29 +1103,18 @@ def impute(
                 aged_df=imputed,
                 status_final=pd.Series(pd.NA, index=imputed.index, dtype="object"),
                 start_year_source_type=pd.Series(
-                    pd.NA,
-                    index=imputed.index,
-                    dtype="object",
+                    pd.NA, index=imputed.index, dtype="object"
                 ),
                 end_year_source_type=pd.Series(
-                    pd.NA,
-                    index=imputed.index,
-                    dtype="object",
+                    pd.NA, index=imputed.index, dtype="object"
                 ),
                 lifetimes=lifetimes,
                 start_year_imputation_method=start_year_imputation_method,
             )
-            _save_age_imputation_diagnostics(
-                diagnostics,
-                age_imputation_output_path,
-            )
+            _save_age_imputation_diagnostics(diagnostics, age_imputation_output_path)
+            _save_age_profile_diagnostics(pd.DataFrame(), age_profile_output_path)
             _save_age_profile_diagnostics(
-                pd.DataFrame(),
-                age_profile_output_path,
-            )
-            _save_age_profile_diagnostics(
-                pd.DataFrame(),
-                retirement_profile_output_path,
+                pd.DataFrame(), retirement_profile_output_path
             )
 
     schema = _schemas.build_schema(technology_mapping, "impute")
@@ -1359,19 +1128,13 @@ def explore(imputed: gpd.GeoDataFrame, output_path: str, colormap="tab20"):
             f.write("No data")
     else:
         explorer = imputed.explore(
-            column="technology",
-            legend=True,
-            popup=True,
-            cmap=colormap,
+            column="technology", legend=True, popup=True, cmap=colormap
         )
         explorer.save(output_path)
 
 
 def plot_powerplant_capacity_buildup(
-    df: pd.DataFrame,
-    output_path: str,
-    colormap: str,
-    cat: str = "powerplant",
+    df: pd.DataFrame, output_path: str, colormap: str, cat: str = "powerplant"
 ):
     """Plot stacked bar charts of active powerplant capacity over time per country.
 
@@ -1420,8 +1183,7 @@ def plot_powerplant_capacity_buildup(
         cap_mw = pd.DataFrame(0.0, index=years, columns=tech_types)
         for year in years:
             active = country_df[
-                (country_df["start_year"] <= year)
-                & (year < country_df["end_year"])
+                (country_df["start_year"] <= year) & (year < country_df["end_year"])
             ]
             cap_mw.loc[year] = (
                 active.groupby("technology")["output_capacity_mw"]
@@ -1429,14 +1191,7 @@ def plot_powerplant_capacity_buildup(
                 .reindex(tech_types, fill_value=0)
             )
 
-        cap_mw.plot(
-            kind="bar",
-            stacked=True,
-            ax=ax,
-            color=colors,
-            legend=False,
-            rot=45,
-        )
+        cap_mw.plot(kind="bar", stacked=True, ax=ax, color=colors, legend=False, rot=45)
         ax.set_title(country)
         ax.set_ylabel("Capacity (MW)")
         ax.locator_params(axis="x", nbins=10)
@@ -1465,14 +1220,12 @@ def main() -> None:
     """Main snakemake process."""
     imputed_gdf = impute(
         relocated_gdf=gpd.read_parquet(snakemake.input.relocated),
-        reference_capacity_df=pd.read_parquet(
-            snakemake.input.category_capacity
-        ),
+        reference_capacity_df=pd.read_parquet(snakemake.input.category_capacity),
         imputation=snakemake.params.imputation,
         technology_mapping=snakemake.params.tech_map,
         age_imputation_output_path=snakemake.output.age_imputation,
         age_profile_output_path=snakemake.output.age_profile,
-        retirement_profile_output_path=snakemake.output.retirement_profile
+        retirement_profile_output_path=snakemake.output.retirement_profile,
     )
     imputed_gdf.to_parquet(snakemake.output.aged)
 
@@ -1486,9 +1239,7 @@ def main() -> None:
 
     age_profile_df = pd.read_parquet(snakemake.output.age_profile)
     plot_age_imputation_profile(
-        age_profile_df,
-        snakemake.output.age_profile_plot,
-        snakemake.wildcards.category,
+        age_profile_df, snakemake.output.age_profile_plot, snakemake.wildcards.category
     )
 
 
