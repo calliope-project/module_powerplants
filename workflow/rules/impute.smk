@@ -76,6 +76,9 @@ rule impute_time:
         age_profile=(
             "<resources>/automatic/shapes/{shapes}/impute_time/{category}_age_profile.parquet"
         ),
+        retirement_profile=(
+            "<resources>/automatic/shapes/{shapes}/impute_time/{category}_retirement_profile.parquet"
+        ),
         age_profile_plot=report(
             "<results>/{shapes}/powerplants/unadjusted/{category}_age_profile.pdf",
             caption="../report/impute_time_profile.rst",
