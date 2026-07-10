@@ -9,8 +9,22 @@
   "imageSize": 100,
   "commit": false,
   "commitConvention": "none",
-  "contributors": [],
+  "contributors": [
+    {
+      "login": "irm-codebase",
+      "name": "Ivan Ruiz Manuel",
+      "avatar_url": "https://avatars.githubusercontent.com/u/72193617?v=4",
+      "profile": "https://orcid.org/0000-0003-2288-6423",
+      "contributions": [
+        "ideas",
+        "code",
+        "doc",
+        "maintenance"
+      ]
+    }
+  ],
   "contributorsPerLine": 7,
   "linkToUsage": false,
-  "contributorsSortAlphabetically": true
+  "contributorsSortAlphabetically": true,
+  "commitType": "docs"
 }
