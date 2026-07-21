@@ -1090,6 +1090,7 @@ def _impute_status(df: pd.DataFrame) -> pd.Series:
 
     return status
 
+
 CAPACITY_DATE_EVENT_COLUMNS = [
     "powerplant_id",
     "name",
@@ -1123,22 +1124,12 @@ def _build_capacity_date_events(imputed: pd.DataFrame) -> pd.DataFrame:
 
     start_events = imputed[
         common_cols + ["start_year", "start_year_source_type"]
-    ].rename(
-        columns={
-            "start_year": "year",
-            "start_year_source_type": "source_type",
-        }
-    )
+    ].rename(columns={"start_year": "year", "start_year_source_type": "source_type"})
     start_events["event_type"] = "commissioning"
     start_events["capacity_change_mw"] = start_events["output_capacity_mw"]
 
-    end_events = imputed[
-        common_cols + ["end_year", "end_year_source_type"]
-    ].rename(
-        columns={
-            "end_year": "year",
-            "end_year_source_type": "source_type",
-        }
+    end_events = imputed[common_cols + ["end_year", "end_year_source_type"]].rename(
+        columns={"end_year": "year", "end_year_source_type": "source_type"}
     )
     end_events["event_type"] = "retirement"
     end_events["capacity_change_mw"] = -end_events["output_capacity_mw"]
@@ -1154,6 +1145,7 @@ def _build_capacity_date_events(imputed: pd.DataFrame) -> pd.DataFrame:
         )
         .reset_index(drop=True)
     )
+
 
 def plot_capacity_date_events(
     events_df: pd.DataFrame,
@@ -1438,7 +1430,9 @@ def impute(
     scenario = SCENARIO_MAP[imputation["scenario"]]
     start_year_imputation_method = imputation["start_year_imputation_method"]
 
-    status_after_observed_date_correction, _ = _reconcile_status_from_observed_dates(relocated_gdf)
+    status_after_observed_date_correction, _ = _reconcile_status_from_observed_dates(
+        relocated_gdf
+    )
 
     # Get facilities within the requested scenario after correcting only
     # the statuses that are already contradicted by observed dates.
