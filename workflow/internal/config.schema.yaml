@@ -28,7 +28,7 @@ $defs:
     additionalProperties:
       type: integer
       minimum: 1
-  
+
   planned_commissioning_year_window:
     type: array
     description: >
@@ -496,4 +496,3 @@ properties:
             default: capacity_profile
           planned_commissioning_year_windows:
             $ref: "#/$defs/planned_commissioning_technology_windows"
-

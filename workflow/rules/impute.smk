@@ -82,7 +82,7 @@ rule impute_time:
         capacity_date_events=(
             "<resources>/automatic/shapes/{shapes}/impute_time/{category}_capacity_date_events.parquet"
         ),
-        planned_profile=( 
+        planned_profile=(
             "<resources>/automatic/shapes/{shapes}/impute_time/{category}_planned_profile.parquet"
         ),
         capacity_date_plot=report(
