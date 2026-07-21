@@ -112,6 +112,7 @@ DATE_SOURCE_METADATA = {
     },
 }
 
+
 def date_source_types_for(year_column: str) -> set[str]:
     """Return source types valid for a date column."""
     return {
@@ -135,6 +136,7 @@ def date_source_colors() -> dict[str, str]:
         source_type: metadata["color"]
         for source_type, metadata in DATE_SOURCE_METADATA.items()
     }
+
 
 def get_eia_stats_in_cat_yr(
     stats: pd.DataFrame, year: int, category: str

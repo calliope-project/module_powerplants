@@ -150,17 +150,13 @@ def build_schema(
             {
                 "start_year_source_type": pa.Column(
                     str,
-                    checks=pa.Check.isin(
-                        _utils.date_source_types_for("start_year")
-                    ),
+                    checks=pa.Check.isin(_utils.date_source_types_for("start_year")),
                     nullable=False,
                     coerce=True,
                 ),
                 "end_year_source_type": pa.Column(
                     str,
-                    checks=pa.Check.isin(
-                        _utils.date_source_types_for("end_year")
-                    ),
+                    checks=pa.Check.isin(_utils.date_source_types_for("end_year")),
                     nullable=False,
                     coerce=True,
                 ),

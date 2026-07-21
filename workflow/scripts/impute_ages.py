@@ -1236,10 +1236,7 @@ def plot_capacity_date_events(
 
     present_source_types = events_df["source_type"].unique().tolist()
 
-    unknown_source_types = (
-        set(present_source_types)
-        - set(_utils.DATE_SOURCE_METADATA)
-    )
+    unknown_source_types = set(present_source_types) - set(_utils.DATE_SOURCE_METADATA)
 
     if unknown_source_types:
         raise ValueError(
@@ -1419,11 +1416,11 @@ def plot_capacity_date_events(
     if not commissioning_profile_df.empty:
         legend_handles.append(
             Line2D(
-                [0], 
-                [0], 
-                color="0.15", 
-                linewidth=2, 
-                label="Commissioning profile for historic assets"
+                [0],
+                [0],
+                color="0.15",
+                linewidth=2,
+                label="Commissioning profile for historic assets",
             )
         )
 
