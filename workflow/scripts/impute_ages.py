@@ -1090,66 +1090,13 @@ def _impute_status(df: pd.DataFrame) -> pd.Series:
 
     return status
 
-
-def _build_age_imputation_diagnostics(
-    original_df: pd.DataFrame,
-    aged_df: pd.DataFrame,
-    status_after_observed_date_correction: pd.Series,
-    status_observed_date_correction_source: pd.Series,
-    status_final: pd.Series,
-    start_year_source_type: pd.Series,
-    end_year_source_type: pd.Series,
-    lifetimes: dict[str, int],
-    start_year_imputation_method: str,
-) -> pd.DataFrame:
-    """Build row-level diagnostics for powerplant age imputation."""
-    passthrough_cols = [
-        "powerplant_id",
-        "name",
-        "country_id",
-        "category",
-        "technology",
-        "output_capacity_mw",
-    ]
-
-    diagnostics = original_df[passthrough_cols].copy()
-
-    diagnostics["lifetime"] = original_df["technology"].map(lifetimes)
-
-    diagnostics["status_original"] = original_df["status"]
-    diagnostics["status_after_observed_date_correction"] = (
-        status_after_observed_date_correction
-    )
-    diagnostics["status_observed_date_correction_source"] = (
-        status_observed_date_correction_source
-    )
-    diagnostics["status_final"] = status_final
-
-    diagnostics["start_year_original"] = original_df["start_year"]
-    diagnostics["start_year"] = aged_df["start_year"]
-    diagnostics["start_year_source_type"] = start_year_source_type
-
-    diagnostics["end_year_original"] = original_df["end_year"]
-    diagnostics["end_year"] = aged_df["end_year"]
-    diagnostics["end_year_source_type"] = end_year_source_type
-
-    diagnostics["retained_after_time_imputation"] = (
-        diagnostics["start_year"].notna() & diagnostics["end_year"].notna()
-    )
-
-    diagnostics["start_year_imputation_method"] = start_year_imputation_method
-
-    return diagnostics.reset_index(drop=True)
-
-
 CAPACITY_DATE_EVENT_COLUMNS = [
     "powerplant_id",
     "name",
     "country_id",
     "category",
     "technology",
-    "status_original",
-    "status_final",
+    "status",
     "year",
     "event_type",
     "source_type",
@@ -1159,14 +1106,9 @@ CAPACITY_DATE_EVENT_COLUMNS = [
 ]
 
 
-def _build_capacity_date_events(diagnostics: pd.DataFrame) -> pd.DataFrame:
-    """Convert plant dates into annual commissioning and retirement events."""
-    if diagnostics.empty:
-        return pd.DataFrame(columns=CAPACITY_DATE_EVENT_COLUMNS)
-
-    retained = diagnostics.loc[diagnostics["retained_after_time_imputation"]].copy()
-
-    if retained.empty:
+def _build_capacity_date_events(imputed: pd.DataFrame) -> pd.DataFrame:
+    """Convert imputed plant dates into annual commissioning and retirement events."""
+    if imputed.empty:
         return pd.DataFrame(columns=CAPACITY_DATE_EVENT_COLUMNS)
 
     common_cols = [
@@ -1175,19 +1117,28 @@ def _build_capacity_date_events(diagnostics: pd.DataFrame) -> pd.DataFrame:
         "country_id",
         "category",
         "technology",
-        "status_original",
-        "status_final",
+        "status",
         "output_capacity_mw",
     ]
 
-    start_events = retained[
+    start_events = imputed[
         common_cols + ["start_year", "start_year_source_type"]
-    ].rename(columns={"start_year": "year", "start_year_source_type": "source_type"})
+    ].rename(
+        columns={
+            "start_year": "year",
+            "start_year_source_type": "source_type",
+        }
+    )
     start_events["event_type"] = "commissioning"
     start_events["capacity_change_mw"] = start_events["output_capacity_mw"]
 
-    end_events = retained[common_cols + ["end_year", "end_year_source_type"]].rename(
-        columns={"end_year": "year", "end_year_source_type": "source_type"}
+    end_events = imputed[
+        common_cols + ["end_year", "end_year_source_type"]
+    ].rename(
+        columns={
+            "end_year": "year",
+            "end_year_source_type": "source_type",
+        }
     )
     end_events["event_type"] = "retirement"
     end_events["capacity_change_mw"] = -end_events["output_capacity_mw"]
@@ -1203,7 +1154,6 @@ def _build_capacity_date_events(diagnostics: pd.DataFrame) -> pd.DataFrame:
         )
         .reset_index(drop=True)
     )
-
 
 def plot_capacity_date_events(
     events_df: pd.DataFrame,
@@ -1465,7 +1415,7 @@ def impute(
     reference_capacity_df: pd.DataFrame,
     imputation: dict,
     technology_mapping: dict,
-) -> tuple[gpd.GeoDataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+) -> tuple[gpd.GeoDataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Add automatic and user imputations to fill missing data.
 
     Args:
@@ -1474,7 +1424,6 @@ def impute(
         imputation: Imputation configuration.
         technology_mapping: Technology-mapping configuration.
     """
-    age_imputation_diagnostics = pd.DataFrame()
     age_profile_diagnostics = pd.DataFrame()
     retirement_profile_diagnostics = pd.DataFrame()
     planned_profile_diagnostics = pd.DataFrame()
@@ -1489,9 +1438,7 @@ def impute(
     scenario = SCENARIO_MAP[imputation["scenario"]]
     start_year_imputation_method = imputation["start_year_imputation_method"]
 
-    (status_after_observed_date_correction, status_observed_date_correction_source) = (
-        _reconcile_status_from_observed_dates(relocated_gdf)
-    )
+    status_after_observed_date_correction, _ = _reconcile_status_from_observed_dates(relocated_gdf)
 
     # Get facilities within the requested scenario after correcting only
     # the statuses that are already contradicted by observed dates.
@@ -1499,7 +1446,6 @@ def impute(
     scenario_gdf["status"] = status_after_observed_date_correction
 
     imputed = scenario_gdf[scenario_gdf["status"].isin(scenario)].copy()
-    original = relocated_gdf.loc[imputed.index].copy()
 
     if not imputed.empty:
         (
@@ -1553,22 +1499,6 @@ def impute(
                 imputed.loc[has_complete_dates]
             )
 
-        age_imputation_diagnostics = _build_age_imputation_diagnostics(
-            original_df=original,
-            aged_df=imputed,
-            status_after_observed_date_correction=(
-                status_after_observed_date_correction.loc[imputed.index]
-            ),
-            status_observed_date_correction_source=(
-                status_observed_date_correction_source.loc[imputed.index]
-            ),
-            status_final=status_final,
-            start_year_source_type=start_year_source_type,
-            end_year_source_type=end_year_source_type,
-            lifetimes=lifetimes,
-            start_year_imputation_method=start_year_imputation_method,
-        )
-
         # Drop projects with insufficient date data.
         imputed = imputed.loc[has_complete_dates].copy()
 
@@ -1579,28 +1509,12 @@ def impute(
         imputed["start_year_source_type"] = start_year_source_type.loc[imputed.index]
         imputed["end_year_source_type"] = end_year_source_type.loc[imputed.index]
     else:
-        age_imputation_diagnostics = _build_age_imputation_diagnostics(
-            original_df=original,
-            aged_df=imputed,
-            status_after_observed_date_correction=(
-                status_after_observed_date_correction.loc[imputed.index]
-            ),
-            status_observed_date_correction_source=(
-                status_observed_date_correction_source.loc[imputed.index]
-            ),
-            status_final=pd.Series(pd.NA, index=imputed.index, dtype="object"),
-            start_year_source_type=pd.Series(
-                pd.NA, index=imputed.index, dtype="object"
-            ),
-            end_year_source_type=pd.Series(pd.NA, index=imputed.index, dtype="object"),
-            lifetimes=lifetimes,
-            start_year_imputation_method=start_year_imputation_method,
-        )
+        imputed["start_year_source_type"] = pd.Series(dtype="object")
+        imputed["end_year_source_type"] = pd.Series(dtype="object")
 
     schema = _schemas.build_schema(technology_mapping, "impute")
     return (
         schema.validate(imputed),
-        age_imputation_diagnostics,
         age_profile_diagnostics,
         retirement_profile_diagnostics,
         planned_profile_diagnostics,
@@ -1710,14 +1624,12 @@ def main() -> None:
         imputed_gdf = relocated_gdf
         imputed_gdf["start_year_source_type"] = pd.Series(dtype="object")
         imputed_gdf["end_year_source_type"] = pd.Series(dtype="object")
-        age_diagnostics_df = pd.DataFrame()
         commissioning_profile_df = pd.DataFrame()
         retirement_profile_df = pd.DataFrame()
         planned_profile_df = pd.DataFrame()
     else:
         (
             imputed_gdf,
-            age_diagnostics_df,
             commissioning_profile_df,
             retirement_profile_df,
             planned_profile_df,
@@ -1729,15 +1641,7 @@ def main() -> None:
         )
     imputed_gdf.to_parquet(snakemake.output.aged)
 
-    age_diagnostics_df.to_parquet(snakemake.output.age_imputation, index=False)
-
-    commissioning_profile_df.to_parquet(snakemake.output.age_profile, index=False)
-
-    retirement_profile_df.to_parquet(snakemake.output.retirement_profile, index=False)
-
-    planned_profile_df.to_parquet(snakemake.output.planned_profile, index=False)
-
-    capacity_date_events_df = _build_capacity_date_events(age_diagnostics_df)
+    capacity_date_events_df = _build_capacity_date_events(imputed_gdf)
 
     capacity_date_events_df.to_parquet(
         snakemake.output.capacity_date_events, index=False

@@ -67,23 +67,8 @@ rule impute_time:
             category="Powerplants module",
             subcategory="{category}",
         ),
-        age_imputation=report(
-            "<resources>/automatic/shapes/{shapes}/impute_time/{category}_age_imputation.parquet",
-            caption="../report/impute_time_age_imputation.rst",
-            category="Powerplants module",
-            subcategory="{category}",
-        ),
-        age_profile=(
-            "<resources>/automatic/shapes/{shapes}/impute_time/{category}_age_profile.parquet"
-        ),
-        retirement_profile=(
-            "<resources>/automatic/shapes/{shapes}/impute_time/{category}_retirement_profile.parquet"
-        ),
         capacity_date_events=(
             "<resources>/automatic/shapes/{shapes}/impute_time/{category}_capacity_date_events.parquet"
-        ),
-        planned_profile=(
-            "<resources>/automatic/shapes/{shapes}/impute_time/{category}_planned_profile.parquet"
         ),
         capacity_date_plot=report(
             "<results>/{shapes}/powerplants/unadjusted/{category}_capacity_date_events.pdf",
