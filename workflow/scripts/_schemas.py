@@ -3,6 +3,7 @@
 # ruff: noqa: UP007
 from typing import Literal
 
+import _utils
 import pandera.pandas as pa
 from pandera.pandas import DataFrameModel, Field, check
 from pandera.typing.geopandas import GeoSeries
@@ -145,6 +146,26 @@ def build_schema(
     elif stage == "impute":
         status_set = IMPUTED_STATUS
         year_overrides = []
+        schema = schema.add_columns(
+            {
+                "start_year_source_type": pa.Column(
+                    str,
+                    checks=pa.Check.isin(
+                        _utils.date_source_types_for("start_year")
+                    ),
+                    nullable=False,
+                    coerce=True,
+                ),
+                "end_year_source_type": pa.Column(
+                    str,
+                    checks=pa.Check.isin(
+                        _utils.date_source_types_for("end_year")
+                    ),
+                    nullable=False,
+                    coerce=True,
+                ),
+            }
+        )
     else:
         raise ValueError(f"Incorrect stage given: '{stage}'.")
 

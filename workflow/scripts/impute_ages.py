@@ -46,54 +46,6 @@ def _reference_categories(category: str) -> list[str]:
     return reference_categories
 
 
-# formatting preferences for the visualisations
-DATE_SOURCE_LABELS = {
-    "observed": "Observed date (from powerplant data)",
-    "derived_from_end_year": "Start date derived from observed end date",
-    "imputed_capacity_profile": "Start date imputed from historical commissioning-profile",
-    "derived_from_imputed_retirement_end_year": "Start date derived from retirement-profile end date",
-    "derived_from_start_year_lifetime": "End date derived from start date and lifetime",
-    "derived_from_start_year_lifetime_capped_to_retired_status": "End date derived from start date but capped to retired status",
-    "derived_from_start_year_lifetime_with_retirement_delay": "End date derived from start date, lifetime, and retirement delay",
-    "observed_adjusted_with_retirement_delay": "Observed end date adjusted with retirement delay",
-    "imputed_retirement_capacity_profile": "End date imputed from retirement-profile",
-    "imputed_construction_window": "Start date imputed within construction window",
-    "imputed_pre_construction_window": "Start date imputed within pre-construction window",
-    "imputed_announced_window": "Start date imputed within announced window",
-}
-
-DATE_SOURCE_COLORS = {
-    "observed": "#aaaaaa",
-    "derived_from_end_year": "#0c2c84",
-    "imputed_capacity_profile": "#225ea8",
-    "imputed_construction_window": "#1d91c0",
-    "imputed_pre_construction_window": "#41b6c4",
-    "imputed_announced_window": "#7fcdbb",
-    "derived_from_imputed_retirement_end_year": "#c7e9b4",
-    "derived_from_start_year_lifetime": "#7a0177",
-    "imputed_retirement_capacity_profile": "#c51b8a",
-    "derived_from_start_year_lifetime_capped_to_retired_status": "#f768a1",
-    "derived_from_start_year_lifetime_with_retirement_delay": "#fa9fb5",
-    "observed_adjusted_with_retirement_delay": "#fcc5c0",
-}
-
-
-DATE_SOURCE_ORDER = [
-    "observed",
-    "derived_from_end_year",
-    "imputed_capacity_profile",
-    "imputed_construction_window",
-    "imputed_pre_construction_window",
-    "imputed_announced_window",
-    "derived_from_imputed_retirement_end_year",
-    "derived_from_start_year_lifetime",
-    "imputed_retirement_capacity_profile",
-    "derived_from_start_year_lifetime_capped_to_retired_status",
-    "derived_from_start_year_lifetime_with_retirement_delay",
-    "observed_adjusted_with_retirement_delay",
-]
-
-
 def _initial_year_source_type(year: pd.Series) -> pd.Series:
     """Label whether year values were originally present or missing."""
     source_type = pd.Series("observed", index=year.index, dtype="object")
@@ -1181,7 +1133,6 @@ def _build_age_imputation_diagnostics(
     diagnostics["end_year"] = aged_df["end_year"]
     diagnostics["end_year_source_type"] = end_year_source_type
 
-    # TODO: these source types should be reflected in scripts/_schemas.
     diagnostics["retained_after_time_imputation"] = (
         diagnostics["start_year"].notna() & diagnostics["end_year"].notna()
     )
@@ -1243,9 +1194,7 @@ def _build_capacity_date_events(diagnostics: pd.DataFrame) -> pd.DataFrame:
 
     events = pd.concat([start_events, end_events], ignore_index=True)
 
-    events["source_label"] = (
-        events["source_type"].map(DATE_SOURCE_LABELS).fillna(events["source_type"])
-    )
+    events["source_label"] = events["source_type"].map(_utils.date_source_labels())
 
     return (
         events[CAPACITY_DATE_EVENT_COLUMNS]
@@ -1287,24 +1236,23 @@ def plot_capacity_date_events(
 
     present_source_types = events_df["source_type"].unique().tolist()
 
+    unknown_source_types = (
+        set(present_source_types)
+        - set(_utils.DATE_SOURCE_METADATA)
+    )
+
+    if unknown_source_types:
+        raise ValueError(
+            f"Missing DATE_SOURCE_METADATA entries for: {sorted(unknown_source_types)}"
+        )
+
     source_types = [
         source_type
-        for source_type in DATE_SOURCE_ORDER
+        for source_type in _utils.DATE_SOURCE_METADATA
         if source_type in present_source_types
     ]
 
-    source_types.extend(sorted(set(present_source_types) - set(source_types)))
-
-    missing_colors = set(source_types) - set(DATE_SOURCE_COLORS)
-
-    if missing_colors:
-        raise ValueError(
-            f"Missing DATE_SOURCE_COLORS entries for: {sorted(missing_colors)}"
-        )
-
-    source_colors = {
-        source_type: DATE_SOURCE_COLORS[source_type] for source_type in source_types
-    }
+    source_colors = _utils.date_source_colors()
 
     n_countries = len(countries)
     cols = 2 if n_countries > 1 else 1
@@ -1431,7 +1379,7 @@ def plot_capacity_date_events(
                 -retirement_target["target_final_mw"],
                 color="0.15",
                 linewidth=2,
-                linestyle="--",
+                linestyle=":",
             )
 
         if not planned_target.empty:
@@ -1446,7 +1394,7 @@ def plot_capacity_date_events(
                 planned_target["target_imputed_mw"],
                 color="0.35",
                 linewidth=2,
-                linestyle=":",
+                linestyle="--",
             )
 
         ax.axhline(0, color="0.35", linewidth=0.8)
@@ -1463,14 +1411,20 @@ def plot_capacity_date_events(
     legend_handles = [
         Patch(
             facecolor=source_colors[source_type],
-            label=DATE_SOURCE_LABELS.get(source_type, source_type),
+            label=_utils.DATE_SOURCE_METADATA[source_type]["label"],
         )
         for source_type in source_types
     ]
 
     if not commissioning_profile_df.empty:
         legend_handles.append(
-            Line2D([0], [0], color="0.15", linewidth=2, label="Commissioning target")
+            Line2D(
+                [0], 
+                [0], 
+                color="0.15", 
+                linewidth=2, 
+                label="Commissioning profile for historic assets"
+            )
         )
 
     if not retirement_profile_df.empty:
@@ -1480,8 +1434,8 @@ def plot_capacity_date_events(
                 [0],
                 color="0.15",
                 linewidth=2,
-                linestyle="--",
-                label="Retirement target",
+                linestyle=":",
+                label="Retirement profile for historic assets",
             )
         )
 
@@ -1492,8 +1446,8 @@ def plot_capacity_date_events(
                 [0],
                 color="0.35",
                 linewidth=2,
-                linestyle=":",
-                label="Planned imputation target",
+                linestyle="--",
+                label="Commissioning profile for planned assets",
             )
         )
 
@@ -1623,6 +1577,10 @@ def impute(
 
         # Update the powerplant status.
         imputed["status"] = status_final.loc[imputed.index]
+
+        # Pass date-source provenance forward.
+        imputed["start_year_source_type"] = start_year_source_type.loc[imputed.index]
+        imputed["end_year_source_type"] = end_year_source_type.loc[imputed.index]
     else:
         age_imputation_diagnostics = _build_age_imputation_diagnostics(
             original_df=original,
@@ -1753,6 +1711,8 @@ def main() -> None:
     reference_capacity_df = pd.read_parquet(snakemake.input.category_capacity)
     if relocated_gdf.empty:
         imputed_gdf = relocated_gdf
+        imputed_gdf["start_year_source_type"] = pd.Series(dtype="object")
+        imputed_gdf["end_year_source_type"] = pd.Series(dtype="object")
         age_diagnostics_df = pd.DataFrame()
         commissioning_profile_df = pd.DataFrame()
         retirement_profile_df = pd.DataFrame()
