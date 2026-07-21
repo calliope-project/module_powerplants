@@ -492,7 +492,6 @@ properties:
               commissioning statistics.
             type: string
             enum:
-              - group_average
               - capacity_profile
             default: capacity_profile
           planned_commissioning_year_windows:
