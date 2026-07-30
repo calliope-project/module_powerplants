@@ -68,8 +68,9 @@ def _build_reference_addition_profile(
             & (reference_capacity_df["year"] <= _utils.DATASET_YEAR),
             ["year", "capacity_mw"],
         ]
-        .sort_values("year")
-        .set_index("year")["capacity_mw"]
+        .groupby("year", as_index=True)["capacity_mw"]
+        .sum()
+        .sort_index()
     )
 
     # Positive annual stock changes provide the temporal commissioning
@@ -120,8 +121,9 @@ def _build_reference_retirement_profile(
             & (reference_capacity_df["year"] < _utils.DATASET_YEAR),
             ["year", "capacity_mw"],
         ]
-        .sort_values("year")
-        .set_index("year")["capacity_mw"]
+        .groupby("year", as_index=True)["capacity_mw"]
+        .sum()
+        .sort_index()
     )
 
     reference_stock = capacity_stock.reindex(years)
