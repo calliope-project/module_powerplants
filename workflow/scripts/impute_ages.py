@@ -40,6 +40,7 @@ def _reference_categories(category: str) -> list[str]:
     """Return reference-capacity categories matching a powerplant category."""
     return _utils.listify(REFERENCE_CATEGORY_MAP.get(category, category))
 
+
 def _reference_capacity_stock(
     reference_capacity_df: pd.DataFrame,
     country_id: str,
@@ -63,6 +64,7 @@ def _reference_capacity_stock(
         .sum()
         .sort_index()
     )
+
 
 def _initial_year_source_type(year: pd.Series) -> pd.Series:
     """Label whether year values were originally present or missing."""
@@ -357,6 +359,7 @@ def _complete_capacity_profile(
         }
     )
 
+
 def _complete_retirement_profile(
     profile: pd.DataFrame,
     undated_df: pd.DataFrame,
@@ -393,6 +396,7 @@ def _complete_retirement_profile(
         }
     )
 
+
 def _complete_planned_commissioning_profile(
     undated_df: pd.DataFrame,
     assigned_years: pd.Series,
@@ -428,6 +432,7 @@ def _complete_planned_commissioning_profile(
             "imputed_mw": imputed_capacity,
         }
     )
+
 
 def _impute_start_years_by_capacity_profile(
     prepared_df: pd.DataFrame,

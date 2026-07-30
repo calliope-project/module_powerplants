@@ -88,9 +88,13 @@ class PlantSchema(DataFrameModel):
     "Expected decommissioning year."
     status: Series[str]
     "Known state of the project."
-    start_year_source_type: Series[str] | None = Field(isin=_utils.date_source_types_for("start_year"))
+    start_year_source_type: Series[str] | None = Field(
+        isin=_utils.date_source_types_for("start_year")
+    )
     "Source/provenance label for the start year."
-    end_year_source_type: Series[str] | None = Field(isin=_utils.date_source_types_for("end_year"))
+    end_year_source_type: Series[str] | None = Field(
+        isin=_utils.date_source_types_for("end_year")
+    )
     "Source/provenance label for the end year."
     # Location / size
     geometry: GeoSeries[Point] = Field()
