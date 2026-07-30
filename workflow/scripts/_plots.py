@@ -273,7 +273,7 @@ def get_time_imputation_colours() -> dict[str, str]:
     end_only_sources = end_year_sources - start_year_sources
 
     return (
-        get_colour_dict(observed_sources, "colorbrewer:Greys", value_range=(0.3,0.3))
-        | get_colour_dict(start_only_sources, "colorbrewer:Purples")
-        | get_colour_dict(end_only_sources, "colorbrewer:Reds")
+        get_colour_dict(observed_sources, "colorbrewer:Greys", value_range=(0.3,0.4))  #forces observed values to a light grey
+        | get_colour_dict(start_only_sources, "colorbrewer:Purples", value_range=(0.1,1))  #prevents anything to pale in the plot
+        | get_colour_dict(end_only_sources, "colorbrewer:Reds",value_range=(0.1,1)) #prevents anything to pale in the plot
     )

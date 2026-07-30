@@ -724,29 +724,15 @@ def _impute_planned_start_years(
             f"imputed_{status.replace('-', '_')}_window"
         )
 
-        group_mask = (
-            prepared_df["country_id"].eq(country_id)
-            & prepared_df["category"].eq(category)
-            & prepared_df["technology"].eq(technology)
-            & prepared_df["status"].eq(status)
-        )
-
-        dated_group = prepared_df.loc[
-            group_mask & prepared_df["start_year"].notna()
-        ].copy()
-
         profiles.append(
             _complete_planned_commissioning_profile(
                 undated_df=undated_group,
-                dated_df=dated_group,
                 assigned_years=assigned_years,
                 target=flat_target,
                 country_id=country_id,
                 category=category,
                 technology=technology,
                 status=status,
-                lower_offset=lower_offset,
-                upper_offset=upper_offset,
             )
         )
 
