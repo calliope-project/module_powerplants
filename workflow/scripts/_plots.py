@@ -1,10 +1,13 @@
 """Plot functions used in one or more rules."""
 
+from collections.abc import Collection
+
 import _schemas
 import _utils
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+from cmap import Colormap
 from matplotlib import pyplot as plt
 from matplotlib import ticker as mticker
 from matplotlib.axes import Axes
@@ -238,3 +241,39 @@ def plot_capacity_aggregation(
         ax.set_axis_off()
         ax.set_title(title + f" in year {agg.attrs['year']}")
         fig.savefig(output_file, bbox_inches="tight")
+
+def get_colour_dict(
+    sources: Collection[str],
+    colormap: str,
+    *,
+    value_range: tuple[float, float] = (0.0, 1.0),
+) -> dict[str, str]:
+    """Return deterministic colours for a collection of source types."""
+    sorted_sources = sorted(sources)
+
+    if not sorted_sources:
+        return {}
+
+    cmap = Colormap(colormap).to_mpl()
+    values = np.linspace(value_range[0], value_range[1], len(sorted_sources))
+
+    return {
+        source: colour
+        for source, colour in zip(sorted_sources, cmap(values), strict=True)
+    }
+
+
+def get_time_imputation_colours() -> dict[str, str]:
+    """Return colours for time-imputation source types."""
+    start_year_sources = _utils.date_source_types_for("start_year")
+    end_year_sources = _utils.date_source_types_for("end_year")
+
+    observed_sources = start_year_sources & end_year_sources
+    start_only_sources = start_year_sources - end_year_sources
+    end_only_sources = end_year_sources - start_year_sources
+
+    return (
+        get_colour_dict(observed_sources, "colorbrewer:Greys", value_range=(0.3,0.3))
+        | get_colour_dict(start_only_sources, "colorbrewer:Purples")
+        | get_colour_dict(end_only_sources, "colorbrewer:Reds")
+    )

@@ -52,62 +52,50 @@ EIA_CAT_MAPPING = {k: listify(v) for k, v in EIA_CAT_MAPPING.items()}
 DATE_SOURCE_METADATA = {
     "observed": {
         "label": "Observed date (from powerplant data)",
-        "color": "#bbbbbb",
         "applies_to": {"start_year", "end_year"},
     },
     "derived_from_end_year": {
         "label": "Start date derived from observed end date",
-        "color": "#0c2c84",
         "applies_to": {"start_year"},
     },
     "imputed_capacity_profile": {
         "label": "Start date imputed from historical commissioning-profile",
-        "color": "#225ea8",
         "applies_to": {"start_year"},
     },
     "imputed_construction_window": {
         "label": "Start date imputed within construction window",
-        "color": "#1d91c0",
         "applies_to": {"start_year"},
     },
     "imputed_pre_construction_window": {
         "label": "Start date imputed within pre-construction window",
-        "color": "#41b6c4",
         "applies_to": {"start_year"},
     },
     "imputed_announced_window": {
         "label": "Start date imputed within announced window",
-        "color": "#7fcdbb",
         "applies_to": {"start_year"},
     },
     "derived_from_imputed_retirement_end_year": {
         "label": "Start date derived from retirement-profile end date",
-        "color": "#b5f9e1",
         "applies_to": {"start_year"},
     },
     "derived_from_start_year_lifetime": {
         "label": "End date derived from start date and lifetime",
-        "color": "#7a0177",
         "applies_to": {"end_year"},
     },
     "imputed_retirement_capacity_profile": {
         "label": "End date imputed from retirement-profile",
-        "color": "#c51b8a",
         "applies_to": {"end_year"},
     },
     "derived_from_start_year_lifetime_capped_to_retired_status": {
         "label": "End date derived from start date but capped to retired status",
-        "color": "#f768a1",
         "applies_to": {"end_year"},
     },
     "derived_from_start_year_lifetime_with_retirement_delay": {
         "label": "End date derived from start date, lifetime, and retirement delay",
-        "color": "#fa9fb5",
         "applies_to": {"end_year"},
     },
     "observed_adjusted_with_retirement_delay": {
         "label": "Observed end date adjusted with retirement delay",
-        "color": "#fcc5c0",
         "applies_to": {"end_year"},
     },
 }
@@ -126,14 +114,6 @@ def date_source_labels() -> dict[str, str]:
     """Return date-source display labels."""
     return {
         source_type: metadata["label"]
-        for source_type, metadata in DATE_SOURCE_METADATA.items()
-    }
-
-
-def date_source_colors() -> dict[str, str]:
-    """Return date-source display colours."""
-    return {
-        source_type: metadata["color"]
         for source_type, metadata in DATE_SOURCE_METADATA.items()
     }
 

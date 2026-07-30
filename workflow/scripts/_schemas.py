@@ -88,6 +88,10 @@ class PlantSchema(DataFrameModel):
     "Expected decommissioning year."
     status: Series[str]
     "Known state of the project."
+    start_year_source_type: Series[str] | None = Field(isin=_utils.date_source_types_for("start_year"))
+    "Source/provenance label for the start year."
+    end_year_source_type: Series[str] | None = Field(isin=_utils.date_source_types_for("end_year"))
+    "Source/provenance label for the end year."
     # Location / size
     geometry: GeoSeries[Point] = Field()
     "Powerplant point data."
@@ -146,22 +150,6 @@ def build_schema(
     elif stage == "impute":
         status_set = IMPUTED_STATUS
         year_overrides = []
-        schema = schema.add_columns(
-            {
-                "start_year_source_type": pa.Column(
-                    str,
-                    checks=pa.Check.isin(_utils.date_source_types_for("start_year")),
-                    nullable=False,
-                    coerce=True,
-                ),
-                "end_year_source_type": pa.Column(
-                    str,
-                    checks=pa.Check.isin(_utils.date_source_types_for("end_year")),
-                    nullable=False,
-                    coerce=True,
-                ),
-            }
-        )
     else:
         raise ValueError(f"Incorrect stage given: '{stage}'.")
 

@@ -38,13 +38,31 @@ REFERENCE_CATEGORY_MAP = _utils.EIA_CAT_MAPPING
 
 def _reference_categories(category: str) -> list[str]:
     """Return reference-capacity categories matching a powerplant category."""
-    reference_categories = REFERENCE_CATEGORY_MAP.get(category, category)
+    return _utils.listify(REFERENCE_CATEGORY_MAP.get(category, category))
 
-    if isinstance(reference_categories, str):
-        return [reference_categories]
+def _reference_capacity_stock(
+    reference_capacity_df: pd.DataFrame,
+    country_id: str,
+    categories: list[str],
+    max_year: int,
+) -> pd.Series:
+    """Return annual reference-capacity stock for mapped categories.
 
-    return reference_categories
-
+    Multiple reference categories may map to one powerplant category, such as
+    hydropower and pumped storage. These are summed by year before deriving
+    commissioning or retirement profiles.
+    """
+    return (
+        reference_capacity_df.loc[
+            reference_capacity_df["country_id"].eq(country_id)
+            & reference_capacity_df["category"].isin(categories)
+            & reference_capacity_df["year"].le(max_year),
+            ["year", "capacity_mw"],
+        ]
+        .groupby("year", as_index=True)["capacity_mw"]
+        .sum()
+        .sort_index()
+    )
 
 def _initial_year_source_type(year: pd.Series) -> pd.Series:
     """Label whether year values were originally present or missing."""
@@ -61,16 +79,11 @@ def _build_reference_addition_profile(
     smoothing_window: int = 1,
 ) -> pd.DataFrame:
     """Build an annual commissioning profile from capacity stock data."""
-    capacity_stock = (
-        reference_capacity_df.loc[
-            (reference_capacity_df["country_id"] == country_id)
-            & (reference_capacity_df["category"].isin(categories))
-            & (reference_capacity_df["year"] <= _utils.DATASET_YEAR),
-            ["year", "capacity_mw"],
-        ]
-        .groupby("year", as_index=True)["capacity_mw"]
-        .sum()
-        .sort_index()
+    capacity_stock = _reference_capacity_stock(
+        reference_capacity_df=reference_capacity_df,
+        country_id=country_id,
+        categories=categories,
+        max_year=_utils.DATASET_YEAR,
     )
 
     # Positive annual stock changes provide the temporal commissioning
@@ -90,6 +103,9 @@ def _build_reference_addition_profile(
 
     profile_fallback_used = profile_basis.sum() <= 0
 
+    # If the reference series contains no positive capacity changes, there is no
+    # commissioning pattern to follow. Use a uniform profile so missing capacity can
+    # still be allocated across the candidate years.
     if profile_fallback_used:
         profile_basis.loc[:] = 1.0
 
@@ -114,16 +130,11 @@ def _build_reference_retirement_profile(
     years: pd.Index,
 ) -> pd.DataFrame:
     """Build an annual retirement profile from capacity-stock reductions."""
-    capacity_stock = (
-        reference_capacity_df.loc[
-            (reference_capacity_df["country_id"] == country_id)
-            & (reference_capacity_df["category"].isin(categories))
-            & (reference_capacity_df["year"] < _utils.DATASET_YEAR),
-            ["year", "capacity_mw"],
-        ]
-        .groupby("year", as_index=True)["capacity_mw"]
-        .sum()
-        .sort_index()
+    capacity_stock = _reference_capacity_stock(
+        reference_capacity_df=reference_capacity_df,
+        country_id=country_id,
+        categories=categories,
+        max_year=_utils.DATASET_YEAR - 1,
     )
 
     reference_stock = capacity_stock.reindex(years)
@@ -137,6 +148,9 @@ def _build_reference_retirement_profile(
     profile_basis = reference_negative_change.copy()
     profile_fallback_used = profile_basis.sum() <= 0
 
+    # If the reference series contains no negative capacity changes, there is no
+    # retirement pattern to follow. Use a uniform profile so missing retirements can
+    # still be allocated across the candidate years.
     if profile_fallback_used:
         profile_basis.loc[:] = 1.0
 
@@ -316,7 +330,7 @@ def _complete_capacity_profile(
     category: str,
     reference_category: str,
 ) -> pd.DataFrame:
-    """Add realised imputed capacity and allocation diagnostics."""
+    """Return the commissioning-profile target used in the diagnostic plot."""
     assignments = pd.DataFrame(
         {
             "start_year": assigned_years,
@@ -331,63 +345,17 @@ def _complete_capacity_profile(
         .reindex(profile.index, fill_value=0.0)
     )
 
-    result = profile.copy()
-    result["imputed_mw"] = imputed_capacity
-    result["final_mw"] = result["observed_mw"] + result["imputed_mw"]
-    result["allocation_error_mw"] = result["imputed_mw"] - result["residual_target_mw"]
-
-    # One minus the normalised absolute difference between the target and
-    # realised imputed profiles. A value of one indicates an exact match.
-    missing_capacity_mw = undated_df["output_capacity_mw"].sum()
-    allocation_match = 1.0 - (
-        result["allocation_error_mw"].abs().sum() / (2.0 * missing_capacity_mw)
+    return pd.DataFrame(
+        {
+            "country_id": country_id,
+            "category": category,
+            "reference_category": reference_category,
+            "year": profile.index,
+            "target_final_mw": profile["target_final_mw"],
+            "observed_mw": profile["observed_mw"],
+            "imputed_mw": imputed_capacity,
+        }
     )
-    final_profile_error_mw = result["final_mw"] - result["target_final_mw"]
-
-    total_capacity_mw = result["target_final_mw"].sum()
-
-    final_profile_match = 1.0 - (
-        final_profile_error_mw.abs().sum() / (2.0 * total_capacity_mw)
-    )
-
-    result["country_id"] = country_id
-    result["category"] = category
-    result["reference_category"] = reference_category
-    result["missing_capacity_mw"] = missing_capacity_mw
-    result["number_imputed"] = len(undated_df)
-    result["years_used"] = assigned_years.nunique()
-    result["allocation_match"] = allocation_match
-    result["final_profile_match"] = final_profile_match
-
-    result.index.name = "year"
-
-    column_order = [
-        "country_id",
-        "category",
-        "reference_category",
-        "year",
-        "reference_stock_mw",
-        "reference_positive_change_mw",
-        "reference_profile_basis_mw",
-        "reference_profile_weight",
-        "target_final_mw",
-        "observed_mw",
-        "raw_residual_mw",
-        "residual_target_mw",
-        "imputed_mw",
-        "final_mw",
-        "allocation_error_mw",
-        "missing_capacity_mw",
-        "number_imputed",
-        "years_used",
-        "allocation_match",
-        "final_profile_match",
-        "profile_fallback_used",
-        "residual_fallback_used",
-    ]
-
-    return result.reset_index()[column_order]
-
 
 def _complete_retirement_profile(
     profile: pd.DataFrame,
@@ -397,7 +365,7 @@ def _complete_retirement_profile(
     category: str,
     reference_category: str,
 ) -> pd.DataFrame:
-    """Add realised retirement capacity and allocation diagnostics."""
+    """Return the retirement-profile target used in the diagnostic plot."""
     assignments = pd.DataFrame(
         {
             "end_year": assigned_end_years,
@@ -412,77 +380,29 @@ def _complete_retirement_profile(
         .reindex(profile.index, fill_value=0.0)
     )
 
-    result = profile.copy()
-    result["imputed_mw"] = imputed_capacity
-    result["final_mw"] = result["observed_mw"] + result["imputed_mw"]
-    result["allocation_error_mw"] = result["imputed_mw"] - result["residual_target_mw"]
-
-    missing_capacity_mw = undated_df["output_capacity_mw"].sum()
-
-    allocation_match = 1.0 - (
-        result["allocation_error_mw"].abs().sum() / (2.0 * missing_capacity_mw)
+    return pd.DataFrame(
+        {
+            "country_id": country_id,
+            "category": category,
+            "reference_category": reference_category,
+            "profile_source": profile["profile_source"],
+            "year": profile.index,
+            "target_final_mw": profile["target_final_mw"],
+            "observed_mw": profile["observed_mw"],
+            "imputed_mw": imputed_capacity,
+        }
     )
-
-    final_profile_error_mw = result["final_mw"] - result["target_final_mw"]
-    total_capacity_mw = result["target_final_mw"].sum()
-
-    final_profile_match = 1.0 - (
-        final_profile_error_mw.abs().sum() / (2.0 * total_capacity_mw)
-    )
-
-    result["country_id"] = country_id
-    result["category"] = category
-    result["reference_category"] = reference_category
-    result["missing_capacity_mw"] = missing_capacity_mw
-    result["number_imputed"] = len(undated_df)
-    result["years_used"] = assigned_end_years.nunique()
-    result["allocation_match"] = allocation_match
-    result["final_profile_match"] = final_profile_match
-
-    result.index.name = "year"
-
-    column_order = [
-        "country_id",
-        "category",
-        "reference_category",
-        "profile_source",
-        "year",
-        "reference_stock_mw",
-        "reference_negative_change_mw",
-        "reference_profile_basis_mw",
-        "reference_profile_weight",
-        "target_final_mw",
-        "observed_mw",
-        "raw_residual_mw",
-        "residual_target_mw",
-        "imputed_mw",
-        "final_mw",
-        "allocation_error_mw",
-        "missing_capacity_mw",
-        "number_imputed",
-        "years_used",
-        "allocation_match",
-        "final_profile_match",
-        "profile_fallback_used",
-        "residual_fallback_used",
-    ]
-
-    return result.reset_index()[column_order]
-
 
 def _complete_planned_commissioning_profile(
     undated_df: pd.DataFrame,
-    dated_df: pd.DataFrame,
     assigned_years: pd.Series,
     target: pd.Series,
     country_id: str,
     category: str,
     technology: str,
     status: str,
-    lower_offset: int,
-    upper_offset: int,
 ) -> pd.DataFrame:
-    """Build diagnostics for flat planned commissioning allocation."""
+    """Return the planned commissioning profile used in the diagnostic plot."""
     assignments = pd.DataFrame(
         {
             "year": assigned_years,
@@ -497,63 +417,17 @@ def _complete_planned_commissioning_profile(
         .reindex(target.index, fill_value=0.0)
     )
 
-    known_capacity = (
-        dated_df.groupby("start_year")["output_capacity_mw"]
-        .sum()
-        .reindex(target.index, fill_value=0.0)
-    )
-
-    result = pd.DataFrame(
+    return pd.DataFrame(
         {
+            "country_id": country_id,
+            "category": category,
+            "technology": technology,
+            "status": status,
+            "year": target.index,
             "target_imputed_mw": target,
-            "known_mw": known_capacity,
             "imputed_mw": imputed_capacity,
         }
     )
-
-    result["final_mw"] = result["known_mw"] + result["imputed_mw"]
-    result["allocation_error_mw"] = result["imputed_mw"] - result["target_imputed_mw"]
-
-    missing_capacity_mw = undated_df["output_capacity_mw"].sum()
-
-    allocation_match = 1.0 - (
-        result["allocation_error_mw"].abs().sum() / (2.0 * missing_capacity_mw)
-    )
-
-    result["country_id"] = country_id
-    result["category"] = category
-    result["technology"] = technology
-    result["status"] = status
-    result["lower_offset"] = lower_offset
-    result["upper_offset"] = upper_offset
-    result["missing_capacity_mw"] = missing_capacity_mw
-    result["number_imputed"] = len(undated_df)
-    result["years_used"] = assigned_years.nunique()
-    result["allocation_match"] = allocation_match
-
-    result.index.name = "year"
-
-    column_order = [
-        "country_id",
-        "category",
-        "technology",
-        "status",
-        "year",
-        "lower_offset",
-        "upper_offset",
-        "target_imputed_mw",
-        "known_mw",
-        "imputed_mw",
-        "final_mw",
-        "allocation_error_mw",
-        "missing_capacity_mw",
-        "number_imputed",
-        "years_used",
-        "allocation_match",
-    ]
-
-    return result.reset_index()[column_order]
-
 
 def _impute_start_years_by_capacity_profile(
     prepared_df: pd.DataFrame,
@@ -1128,12 +1002,17 @@ def _build_capacity_date_events(imputed: pd.DataFrame) -> pd.DataFrame:
         common_cols + ["start_year", "start_year_source_type"]
     ].rename(columns={"start_year": "year", "start_year_source_type": "source_type"})
     start_events["event_type"] = "commissioning"
+    # Keep the plant capacity unchanged and create a signed event value for plotting:
+    # commissioning adds capacity, retirement removes capacity. This signed value is
+    # used only in the capacity-date-events diagnostic table.
     start_events["capacity_change_mw"] = start_events["output_capacity_mw"]
 
     end_events = imputed[common_cols + ["end_year", "end_year_source_type"]].rename(
         columns={"end_year": "year", "end_year_source_type": "source_type"}
     )
     end_events["event_type"] = "retirement"
+    # Retirements are represented as negative events so they can be plotted below
+    # zero without altering the original plant capacity.
     end_events["capacity_change_mw"] = -end_events["output_capacity_mw"]
 
     events = pd.concat([start_events, end_events], ignore_index=True)
@@ -1193,7 +1072,7 @@ def plot_capacity_date_events(
         if source_type in present_source_types
     ]
 
-    source_colors = _utils.date_source_colors()
+    source_colors = _plots.get_time_imputation_colours()
 
     n_countries = len(countries)
     cols = 2 if n_countries > 1 else 1
