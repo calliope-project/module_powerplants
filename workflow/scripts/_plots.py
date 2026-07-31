@@ -279,8 +279,8 @@ def get_time_imputation_colours() -> dict[str, str]:
         )  # forces observed values to a light grey
         | get_colour_dict(
             start_only_sources, "colorbrewer:Purples", value_range=(0.1, 1)
-        )  # prevents anything to pale in the plot
+        )  # prevents anything too pale in the plot
         | get_colour_dict(
             end_only_sources, "colorbrewer:Reds", value_range=(0.1, 1)
-        )  # prevents anything to pale in the plot
+        )  # prevents anything too pale in the plot
     )

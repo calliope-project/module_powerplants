@@ -61,7 +61,7 @@ $defs:
       Technology- and status-specific year-offset windows used to impute
       missing commissioning years for planned powerplants. Each window is
       expressed as [minimum_year_offset, maximum_year_offset] relative to
-      the dataset year.
+      the dataset year (inclusive).
     type: object
     additionalProperties:
       $ref: "#/$defs/planned_commissioning_status_windows"
@@ -484,15 +484,13 @@ properties:
           start_year_imputation_method:
             title: Start year imputation method
             description: |
-              Method used to impute missing start years after direct backfilling
-              from known end years. 'group_average' preserves the previous
-              behaviour by assigning rounded group-average start years.
-              'capacity_profile' assigns missing start years deterministically
-              using capacity-weighted commissioning profiles from annual
-              commissioning statistics.
+              Method used to impute missing start years when backfilling from known
+              end years is not possible.
+
+              - 'capacity_profile' assigns missing start years deterministically using
+              capacity-weighted commissioning profiles from annual commissioning statistics.
             type: string
             enum:
               - capacity_profile
-            default: capacity_profile
           planned_commissioning_year_windows:
             $ref: "#/$defs/planned_commissioning_technology_windows"
