@@ -1,4 +1,4 @@
-# Powerplants module
+# Powerplants
 
 A data module to estimate global powerplant capacities for any region in the world at any resolution.
 

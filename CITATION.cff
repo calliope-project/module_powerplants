@@ -3,9 +3,10 @@
 # https://citation-file-format.github.io/
 cff-version: 1.2.0
 message: If you use this software or data produced by it, please cite it using the metadata from this file.
-title: "Modelblocks - module_powerplants: Powerplants module"
+title: "Modelblocks - module_powerplants: Powerplants"
 repository: "https://github.com/modelblocks-org/module_powerplants"
 license: Apache-2.0
 authors:
-  - given-names: Ivan
-    family-names: Ruiz Manuel
+  - given-names: "Ivan"
+    family-names: "Ruiz Manuel"
+    email: "i.ruizmanuel@tudelft.nl"
