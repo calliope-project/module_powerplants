@@ -262,25 +262,3 @@ def get_colour_dict(
         source: colour
         for source, colour in zip(sorted_sources, cmap(values), strict=True)
     }
-
-
-def get_time_imputation_colours() -> dict[str, str]:
-    """Return colours for time-imputation source types."""
-    start_year_sources = _utils.date_source_types_for("start_year")
-    end_year_sources = _utils.date_source_types_for("end_year")
-
-    observed_sources = start_year_sources & end_year_sources
-    start_only_sources = start_year_sources - end_year_sources
-    end_only_sources = end_year_sources - start_year_sources
-
-    return (
-        get_colour_dict(
-            observed_sources, "colorbrewer:Greys", value_range=(0.3, 0.4)
-        )  # forces observed values to a light grey
-        | get_colour_dict(
-            start_only_sources, "colorbrewer:Purples", value_range=(0.1, 1)
-        )  # prevents anything too pale in the plot
-        | get_colour_dict(
-            end_only_sources, "colorbrewer:Reds", value_range=(0.1, 1)
-        )  # prevents anything too pale in the plot
-    )
