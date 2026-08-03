@@ -1,8 +1,10 @@
-"""Imputation of missing values."""
+"""Impute powerplant dates and produce time-imputation diagnostics."""
 
+import heapq
 import math
 import sys
-from typing import TYPE_CHECKING, Any
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, Literal
 
 import _plots
 import _schemas
@@ -10,10 +12,10 @@ import _utils
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from cmap import Colormap
 from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
+from matplotlib.typing import ColorType
 
 if TYPE_CHECKING:
     snakemake: Any
@@ -31,14 +33,32 @@ SCENARIO_MAP = {
     "announced": HISTORICAL | PLANNED,
 }
 
-# Harmonise powerplant categories with the category names used by the
-# annual reference-capacity dataset.
-REFERENCE_CATEGORY_MAP = _utils.EIA_CAT_MAPPING
+PROFILE_COLUMNS = [
+    "country_id",
+    "category",
+    "reference_category",
+    "event_type",
+    "cohort",
+    "technology",
+    "status",
+    "profile_source",
+    "year",
+    "target_mw",
+    "observed_mw",
+    "imputed_mw",
+]
 
 
-def _reference_categories(category: str) -> list[str]:
-    """Return reference-capacity categories matching a powerplant category."""
-    return _utils.listify(REFERENCE_CATEGORY_MAP.get(category, category))
+def empty_profiles() -> pd.DataFrame:
+    """Return an empty normalized profile table."""
+    return pd.DataFrame(columns=PROFILE_COLUMNS)
+
+
+def _initial_year_source_type(year: pd.Series) -> pd.Series:
+    """Label whether year values were originally observed or missing."""
+    source_type = pd.Series("observed", index=year.index, dtype="object")
+    source_type.loc[year.isna()] = "missing_unresolved"
+    return source_type
 
 
 def _reference_capacity_stock(
@@ -47,11 +67,11 @@ def _reference_capacity_stock(
     categories: list[str],
     max_year: int,
 ) -> pd.Series:
-    """Return annual reference-capacity stock for mapped categories.
+    """Return annual reference stock summed across mapped categories.
 
-    Multiple reference categories may map to one powerplant category, such as
-    hydropower and pumped storage. These are summed by year before deriving
-    commissioning or retirement profiles.
+    One powerplant category may map to multiple reference categories. For
+    example, hydropower combines the hydropower and pumped-storage stocks.
+    These are summed by year before deriving event profiles.
     """
     return (
         reference_capacity_df.loc[
@@ -60,912 +80,658 @@ def _reference_capacity_stock(
             & reference_capacity_df["year"].le(max_year),
             ["year", "capacity_mw"],
         ]
-        .groupby("year", as_index=True)["capacity_mw"]
+        .groupby("year")["capacity_mw"]
         .sum(min_count=1)
         .sort_index()
     )
 
 
-def _reference_first_year(
-    reference_capacity_df: pd.DataFrame,
-    country_id: str,
-    categories: list[str],
-    max_year: int,
-) -> int:
-    """Return first year with reported reference-capacity stock."""
-    capacity_stock = _reference_capacity_stock(
-        reference_capacity_df=reference_capacity_df,
-        country_id=country_id,
-        categories=categories,
-        max_year=max_year,
-    )
-
-    reported_years = capacity_stock.loc[capacity_stock.notna()].index
-
-    if reported_years.empty:
-        raise ValueError(
-            "No reported reference capacity years found for "
-            f"{country_id=} and {categories=} up to {max_year=}."
-        )
-
-    return int(reported_years.min())
+def _first_reported_year(capacity_stock: pd.Series) -> int | None:
+    """Return the first reported stock year, if one exists."""
+    reported_years = capacity_stock.index[capacity_stock.notna()]
+    return None if reported_years.empty else int(reported_years.min())
 
 
-def _initial_year_source_type(year: pd.Series) -> pd.Series:
-    """Label whether year values were originally present or missing."""
-    source_type = pd.Series("observed", index=year.index, dtype="object")
-    source_type.loc[year.isna()] = "missing_unresolved"
-    return source_type
-
-
-def _build_reference_addition_profile(
+def _build_reference_profile(
     reference_capacity_df: pd.DataFrame,
     country_id: str,
     categories: list[str],
     years: pd.Index,
+    event_type: Literal["commissioning", "retirement"],
+    *,
     smoothing_window: int = 1,
 ) -> pd.DataFrame:
-    """Build an annual commissioning profile from capacity stock data."""
+    """Build a commissioning or retirement profile from annual stock changes."""
     capacity_stock = _reference_capacity_stock(
-        reference_capacity_df=reference_capacity_df,
-        country_id=country_id,
-        categories=categories,
-        max_year=_utils.DATASET_YEAR,
+        reference_capacity_df, country_id, categories, years.max()
     )
 
-    # Positive annual stock changes provide the temporal commissioning
-    # profile. Negative changes represent retirements or revisions and do
-    # not contribute commissioning weight hence clipped to 0.
-    reference_stock = capacity_stock.reindex(years)
-    reference_positive_change = (
-        capacity_stock.diff().clip(lower=0.0).reindex(years).fillna(0.0)
-    )
-
-    profile_basis = reference_positive_change.copy()
-
+    # Annual stock changes are only a proxy for gross events.
+    # - Positive net changes provide commissioning weight
+    # - Negative net changes provide retirement weight.
+    # Changes in the opposite direction are clipped out.
+    direction = 1 if event_type == "commissioning" else -1
+    change = (direction * capacity_stock.diff()).clip(lower=0).reindex(years).fillna(0)
+    basis = change.copy()
     if smoothing_window > 1:
-        profile_basis = profile_basis.rolling(
-            window=smoothing_window, center=True, min_periods=1
-        ).mean()
+        basis = basis.rolling(smoothing_window, center=True, min_periods=1).mean()
 
-    profile_fallback_used = profile_basis.sum() <= 0
+    fallback_used = basis.sum() <= 0
+    if fallback_used:
+        # A uniform 'flat' profile keeps dates imputable when reference history is
+        # absent, or contains no changes in the requested direction.
+        basis.loc[:] = 1.0
 
-    # If the reference series contains no positive capacity changes, there is no
-    # commissioning pattern to follow. Use a uniform profile so missing capacity can
-    # still be allocated across the candidate years.
-    if profile_fallback_used:
-        profile_basis.loc[:] = 1.0
-
-    profile = pd.DataFrame(
+    return pd.DataFrame(
         {
-            "reference_stock_mw": reference_stock,
-            "reference_positive_change_mw": reference_positive_change,
-            "reference_profile_basis_mw": profile_basis,
-            "reference_profile_weight": profile_basis / profile_basis.sum(),
+            "reference_stock_mw": capacity_stock.reindex(years),
+            "reference_change_mw": change,
+            "reference_profile_basis_mw": basis,
+            "reference_profile_weight": basis / basis.sum(),
+            "profile_fallback_used": fallback_used,
         },
         index=years,
     )
-    profile["profile_fallback_used"] = profile_fallback_used
-
-    return profile
 
 
-def _build_reference_retirement_profile(
-    reference_capacity_df: pd.DataFrame,
-    country_id: str,
-    categories: list[str],
-    years: pd.Index,
-) -> pd.DataFrame:
-    """Build an annual retirement profile from capacity-stock reductions."""
-    capacity_stock = _reference_capacity_stock(
-        reference_capacity_df=reference_capacity_df,
-        country_id=country_id,
-        categories=categories,
-        max_year=_utils.DATASET_YEAR - 1,
-    )
-
-    reference_stock = capacity_stock.reindex(years)
-
-    # Negative annual stock changes provide the retirement profile.
-    # Positive changes represent net additions and carry no retirement weight.
-    reference_negative_change = (
-        (-capacity_stock.diff()).clip(lower=0.0).reindex(years).fillna(0.0)
-    )
-
-    profile_basis = reference_negative_change.copy()
-    profile_fallback_used = profile_basis.sum() <= 0
-
-    # If the reference series contains no negative capacity changes, there is no
-    # retirement pattern to follow. Use a uniform profile so missing retirements can
-    # still be allocated across the candidate years.
-    if profile_fallback_used:
-        profile_basis.loc[:] = 1.0
-
-    profile = pd.DataFrame(
-        {
-            "reference_stock_mw": reference_stock,
-            "reference_negative_change_mw": reference_negative_change,
-            "reference_profile_basis_mw": profile_basis,
-            "reference_profile_weight": (profile_basis / profile_basis.sum()),
-        },
-        index=years,
-    )
-    profile["profile_fallback_used"] = profile_fallback_used
-
-    return profile
-
-
-def _build_clipped_residual_profile(
+def _build_residual_profile(
     dated_df: pd.DataFrame,
     profile: pd.DataFrame,
     allocatable_years: pd.Index,
     missing_capacity_mw: float,
     year_col: str,
 ) -> pd.DataFrame:
-    """Add observed capacity and a feasible residual target to a profile."""
+    """Scale a reference profile and subtract capacity with observed dates."""
     result = profile.copy()
-
-    observed_capacity = (
+    observed = (
         dated_df.groupby(year_col)["output_capacity_mw"]
         .sum()
         .reindex(result.index, fill_value=0.0)
     )
 
-    # The reference data determine the temporal shape, whilst the plant
-    # dataset determines the total capacity represented by the profile.
-    total_capacity_mw = observed_capacity.sum() + missing_capacity_mw
-
-    result["observed_mw"] = observed_capacity
+    # Reference data determine the temporal shape, while the plant dataset
+    # determines the total capacity represented by the scaled target.
+    total_capacity_mw = observed.sum() + missing_capacity_mw
+    result["observed_mw"] = observed
     result["target_final_mw"] = result["reference_profile_weight"] * total_capacity_mw
-    result["raw_residual_mw"] = result["target_final_mw"] - result["observed_mw"]
 
-    # Observed dates remain fixed. Years that already exceed the scaled
-    # target therefore receive no additional imputed capacity.
-    residual_target = (
-        result["raw_residual_mw"]
-        .clip(lower=0.0)
+    # Exclude observed overcapacity from the initial residual target. If no
+    # positive residual remains, fall back to the reference or uniform profile.
+    residual = (
+        (result["target_final_mw"] - observed)
+        .clip(lower=0)
         .reindex(allocatable_years, fill_value=0.0)
     )
-
-    residual_fallback_used = residual_target.sum() <= 0
-
-    if residual_fallback_used:
-        residual_target = result["reference_profile_weight"].reindex(
+    if residual.sum() <= 0:
+        residual = result["reference_profile_weight"].reindex(
             allocatable_years, fill_value=0.0
         )
+    if residual.sum() <= 0:
+        residual = pd.Series(1.0, index=allocatable_years)
 
-    if residual_target.sum() <= 0:
-        residual_target = pd.Series(1.0, index=allocatable_years, dtype=float)
-
-    # Rescale the feasible residual so that all missing plant capacity is
-    # allocated while preserving its relative annual shape.
-    residual_target = residual_target / residual_target.sum() * missing_capacity_mw
-
-    result["residual_target_mw"] = residual_target.reindex(result.index, fill_value=0.0)
-    result["residual_fallback_used"] = residual_fallback_used
-
+    # Rescale the feasible residual so every missing capacity block is
+    # allocated while preserving the residual profile's relative shape.
+    residual = residual / residual.sum() * missing_capacity_mw
+    result["residual_target_mw"] = residual.reindex(result.index, fill_value=0.0)
     return result
 
 
-def _select_largest_deficit_year(
-    remaining_target: pd.Series,
-    original_target: pd.Series,
+def _allocate_years_by_target(
+    plants: pd.DataFrame,
+    target: pd.Series,
     *,
+    earliest_year: pd.Series | None = None,
     prefer_later_years: bool = False,
-) -> int:
-    """Select the year with the largest remaining deficit using deterministic ties."""
-    if remaining_target.empty:
-        raise ValueError(
-            "Cannot select an imputation year from an empty target profile."
-        )
-
-    target_ranking = pd.DataFrame(
-        {
-            "year": remaining_target.index,
-            "remaining_target": remaining_target.to_numpy(),
-            "original_target": original_target.loc[remaining_target.index].to_numpy(),
-        }
-    ).sort_values(
-        ["remaining_target", "original_target", "year"],
-        ascending=[False, False, not prefer_later_years],
-    )
-
-    return int(target_ranking.iloc[0]["year"])
-
-
-def _allocate_start_years_by_residual_target(
-    undated_df: pd.DataFrame, residual_target: pd.Series, lifetimes: dict[str, int]
 ) -> pd.Series:
-    """Assign whole plants to feasible years with the largest deficits.
+    """Greedily allocate whole plants using an incremental priority queue."""
+    if target.empty:
+        raise ValueError("Cannot allocate dates against an empty target profile.")
 
-    Plants with the narrowest feasible commissioning windows are processed
-    first. Within equal feasible windows, larger plants are processed first
-    because they are harder to fit into the residual target.
-    """
-    capacities = undated_df["output_capacity_mw"]
-    earliest_feasible_year = _utils.DATASET_YEAR - undated_df["technology"].map(
-        lifetimes
-    )
+    if earliest_year is None:
+        earliest_year = pd.Series(target.index.min(), index=plants.index)
 
     # Allocate the least flexible plants first, then the largest capacity
     # blocks, to reduce poor fits caused by indivisible plants.
     order = pd.DataFrame(
         {
-            "earliest_feasible_year": earliest_feasible_year,
-            "capacity": capacities,
-            "powerplant_id": undated_df["powerplant_id"],
-            "row_order": np.arange(len(undated_df)),
+            "earliest_year": earliest_year,
+            "capacity": plants["output_capacity_mw"],
+            "powerplant_id": plants["powerplant_id"],
+            "row_order": np.arange(len(plants)),
         },
-        index=undated_df.index,
+        index=plants.index,
     ).sort_values(
-        ["earliest_feasible_year", "capacity", "powerplant_id", "row_order"],
+        ["earliest_year", "capacity", "powerplant_id", "row_order"],
         ascending=[False, False, True, True],
     )
 
-    remaining_target = residual_target.copy()
-    assigned_years = pd.Series(np.nan, index=undated_df.index, dtype=float)
+    remaining = target.copy()
+    years_desc = sorted(target.index, reverse=True)
+    next_year = 0
+    heap: list[tuple[float, float, int, int]] = []
+    assigned = pd.Series(np.nan, index=plants.index, dtype=float)
+
+    def push(year: int) -> None:
+        """Add a year to the allocation queue with its current priority."""
+        # heapq is a min-heap: negating values prioritizes the largest deficit
+        # and then the largest original target.
+        year_tie = -year if prefer_later_years else year
+        heapq.heappush(heap, (-remaining.loc[year], -target.loc[year], year_tie, year))
 
     for plant_index in order.index:
-        plant = undated_df.loc[plant_index]
-        plant_capacity = capacities.loc[plant_index]
-        lifetime_years = lifetimes[plant["technology"]]
+        lower_bound = earliest_year.loc[plant_index]
 
-        earliest_year = _utils.DATASET_YEAR - lifetime_years
-        feasible_target = remaining_target.loc[
-            (remaining_target.index >= earliest_year)
-            & (remaining_target.index <= _utils.DATASET_YEAR)
-        ]
+        # Plants are ordered by decreasing lower bound, so newly feasible
+        # earlier years can be added to one persistent heap incrementally.
+        while next_year < len(years_desc) and years_desc[next_year] >= lower_bound:
+            push(years_desc[next_year])
+            next_year += 1
 
-        # Assign the plant to the feasible year with the largest remaining
-        # deficit. Original target size and year provide deterministic ties.
-        assigned_year = _select_largest_deficit_year(
-            remaining_target=feasible_target, original_target=residual_target
+        if not heap:
+            raise ValueError(f"No allocatable year at or after {lower_bound}.")
+
+        # Heap priority matches the original deterministic rule: largest
+        # remaining deficit, then original target, then the configured year tie.
+        _, _, _, assigned_year = heapq.heappop(heap)
+        assigned.loc[plant_index] = assigned_year
+        remaining.loc[assigned_year] -= plants.loc[plant_index, "output_capacity_mw"]
+        # Reinsert the year with its reduced remaining capacity.
+        push(assigned_year)
+
+    return assigned
+
+
+def _profile_rows(
+    profile: pd.DataFrame,
+    plants: pd.DataFrame,
+    assigned_years: pd.Series,
+    *,
+    country_id: str,
+    category: str,
+    event_type: str,
+    cohort: str,
+    profile_source: str,
+    reference_category: str | None = None,
+    technology: str | None = None,
+    status: str | None = None,
+) -> pd.DataFrame:
+    """Return normalized diagnostic rows for an imputed plant cohort."""
+    imputed = (
+        pd.DataFrame(
+            {"year": assigned_years, "output_capacity_mw": plants["output_capacity_mw"]}
         )
-
-        assigned_years.loc[plant_index] = assigned_year
-        remaining_target.loc[assigned_year] -= plant_capacity
-
-    return assigned_years
-
-
-def _allocate_years_by_target(
-    undated_df: pd.DataFrame, target: pd.Series, *, prefer_later_years: bool = False
-) -> pd.Series:
-    """Assign whole plants to years with the largest remaining deficits."""
-    order = (
-        undated_df[["output_capacity_mw", "powerplant_id"]]
-        .assign(row_order=np.arange(len(undated_df)))
-        .sort_values(
-            ["output_capacity_mw", "powerplant_id", "row_order"],
-            ascending=[False, True, True],
-        )
-    )
-
-    remaining_target = target.copy()
-    assigned_years = pd.Series(np.nan, index=undated_df.index, dtype=float)
-
-    for plant_index in order.index:
-        plant_capacity = undated_df.loc[plant_index, "output_capacity_mw"]
-
-        assigned_year = _select_largest_deficit_year(
-            remaining_target=remaining_target,
-            original_target=target,
-            prefer_later_years=prefer_later_years,
-        )
-
-        assigned_years.loc[plant_index] = assigned_year
-        remaining_target.loc[assigned_year] -= plant_capacity
-
-    return assigned_years
-
-
-def _capacity_by_assigned_year(
-    assigned_years: pd.Series, capacities: pd.Series, years: pd.Index, year_col: str
-) -> pd.Series:
-    """Return assigned plant capacity aggregated to the requested years."""
-    assignments = pd.DataFrame(
-        {year_col: assigned_years, "output_capacity_mw": capacities},
-        index=assigned_years.index,
-    )
-
-    return (
-        assignments.groupby(year_col)["output_capacity_mw"]
+        .groupby("year")["output_capacity_mw"]
         .sum()
-        .reindex(years, fill_value=0.0)
+        .reindex(profile.index, fill_value=0.0)
     )
-
-
-def _complete_capacity_profile(
-    profile: pd.DataFrame,
-    undated_df: pd.DataFrame,
-    assigned_years: pd.Series,
-    country_id: str,
-    category: str,
-    reference_category: str,
-) -> pd.DataFrame:
-    """Return the commissioning-profile target used in the diagnostic plot."""
-    imputed_capacity = _capacity_by_assigned_year(
-        assigned_years=assigned_years,
-        capacities=undated_df["output_capacity_mw"],
-        years=profile.index,
-        year_col="start_year",
-    )
-
     return pd.DataFrame(
         {
             "country_id": country_id,
             "category": category,
             "reference_category": reference_category,
-            "year": profile.index,
-            "target_final_mw": profile["target_final_mw"],
-            "observed_mw": profile["observed_mw"],
-            "imputed_mw": imputed_capacity,
-        }
-    )
-
-
-def _complete_retirement_profile(
-    profile: pd.DataFrame,
-    undated_df: pd.DataFrame,
-    assigned_end_years: pd.Series,
-    country_id: str,
-    category: str,
-    reference_category: str,
-) -> pd.DataFrame:
-    """Return the retirement-profile target used in the diagnostic plot."""
-    imputed_capacity = _capacity_by_assigned_year(
-        assigned_years=assigned_end_years,
-        capacities=undated_df["output_capacity_mw"],
-        years=profile.index,
-        year_col="end_year",
-    )
-
-    return pd.DataFrame(
-        {
-            "country_id": country_id,
-            "category": category,
-            "reference_category": reference_category,
-            "profile_source": profile["profile_source"],
-            "year": profile.index,
-            "target_final_mw": profile["target_final_mw"],
-            "observed_mw": profile["observed_mw"],
-            "imputed_mw": imputed_capacity,
-        }
-    )
-
-
-def _complete_planned_commissioning_profile(
-    undated_df: pd.DataFrame,
-    assigned_years: pd.Series,
-    target: pd.Series,
-    country_id: str,
-    category: str,
-    technology: str,
-    status: str,
-) -> pd.DataFrame:
-    """Return the planned commissioning profile used in the diagnostic plot."""
-    imputed_capacity = _capacity_by_assigned_year(
-        assigned_years=assigned_years,
-        capacities=undated_df["output_capacity_mw"],
-        years=target.index,
-        year_col="year",
-    )
-
-    return pd.DataFrame(
-        {
-            "country_id": country_id,
-            "category": category,
+            "event_type": event_type,
+            "cohort": cohort,
             "technology": technology,
             "status": status,
-            "year": target.index,
-            "target_imputed_mw": target,
-            "imputed_mw": imputed_capacity,
+            "profile_source": profile_source,
+            "year": profile.index,
+            "target_mw": profile["target_final_mw"],
+            "observed_mw": profile["observed_mw"],
+            "imputed_mw": imputed,
         }
-    )
+    )[PROFILE_COLUMNS]
 
 
-def _impute_start_years_by_capacity_profile(
-    prepared_df: pd.DataFrame,
+def _impute_operating_start_years(
+    plants: pd.DataFrame,
     reference_capacity_df: pd.DataFrame,
-    lifetimes: dict[str, int],
-    smoothing_window: int = 1,
+    lifetimes: Mapping[str, int],
+    reference_category_mapping: Mapping[str, list[str]],
+    dataset_year: int,
 ) -> tuple[pd.Series, pd.DataFrame]:
-    """Impute operating plant dates against a reference capacity profile."""
-    start_year = prepared_df["start_year"].copy()
-    lifetime = prepared_df["technology"].map(lifetimes)
+    """Impute operating-plant start years from commissioning profiles."""
+    result = pd.Series(np.nan, index=plants.index, dtype=float)
+    profiles: list[pd.DataFrame] = []
+    missing = plants["start_year"].isna() & plants["status"].eq(OPERATING)
 
-    result = pd.Series(np.nan, index=prepared_df.index, dtype=float)
-    profiles = []
-
-    missing_mask = start_year.isna() & prepared_df["status"].eq(OPERATING)
-
-    if not missing_mask.any():
-        return result, pd.DataFrame()
-
-    grouped_missing = prepared_df.loc[missing_mask].groupby(
-        ["country_id", "category"], dropna=False
-    )
-
-    for (country_id, category), undated_group in grouped_missing:
-        reference_categories = _reference_categories(category)
-        reference_category_label = "+".join(reference_categories)
-
-        group_mask = (
-            prepared_df["country_id"].eq(country_id)
-            & prepared_df["category"].eq(category)
-            & prepared_df["status"].isin(HISTORICAL)
-        )
-
-        dated_group = prepared_df.loc[group_mask & start_year.notna()].copy()
-        dated_group["start_year"] = start_year.loc[dated_group.index]
-
-        # this int() is necessary as the subtraction creates a float, was causing errors
-        earliest_allocatable_year = int(
-            (_utils.DATASET_YEAR - lifetime.loc[undated_group.index]).min()
-        )
-
+    for (country_id, category), undated in plants.loc[missing].groupby(
+        ["country_id", "category"]
+    ):
+        # Harmonise plant categories with the annual reference-capacity
+        # categories. Hydropower, for example, combines two reference series.
+        categories = reference_category_mapping[category]
+        group = plants["country_id"].eq(country_id) & plants["category"].eq(category)
+        dated = plants.loc[
+            group & plants["status"].isin(HISTORICAL) & plants["start_year"].notna()
+        ]
+        # Operating plants must start late enough that their configured lifetime
+        # can plausibly extend to the dataset year. Integer conversion is needed
+        # because nullable year arithmetic produces floating-point values.
+        earliest = dataset_year - undated["technology"].map(lifetimes)
         allocatable_years = pd.Index(
-            range(earliest_allocatable_year, _utils.DATASET_YEAR + 1), name="start_year"
+            range(earliest.min(), dataset_year + 1), name="start_year"
         )
-
-        # this int() is necessary, was causing errors
-        reference_first_year = _reference_first_year(
-            reference_capacity_df=reference_capacity_df,
-            country_id=country_id,
-            categories=reference_categories,
-            max_year=_utils.DATASET_YEAR,
+        stock = _reference_capacity_stock(
+            reference_capacity_df, country_id, categories, dataset_year
         )
+        candidates = [earliest.min()]
+        reference_first = _first_reported_year(stock)
+        if reference_first is not None:
+            candidates.append(reference_first)
+        if not dated.empty:
+            candidates.append(int(dated["start_year"].min()))
+        # The diagnostic profile also includes earlier observed/reference years,
+        # although imputed dates remain restricted to allocatable_years.
+        years = pd.Index(range(min(candidates), dataset_year + 1), name="start_year")
 
-        # the int() is necessary, was causing errors
-        observed_first_year = (
-            int(dated_group["start_year"].min())
-            if not dated_group.empty
-            else _utils.DATASET_YEAR
+        profile = _build_reference_profile(
+            reference_capacity_df, country_id, categories, years, "commissioning"
         )
-
-        first_profile_year = min(
-            reference_first_year, observed_first_year, earliest_allocatable_year
+        allocation = _build_residual_profile(
+            dated,
+            profile,
+            allocatable_years,
+            undated["output_capacity_mw"].sum(),
+            "start_year",
         )
-
-        profile_years = pd.Index(
-            range(first_profile_year, _utils.DATASET_YEAR + 1), name="start_year"
+        assigned = _allocate_years_by_target(
+            undated, allocation["residual_target_mw"], earliest_year=earliest
         )
-
-        reference_profile = _build_reference_addition_profile(
-            reference_capacity_df=reference_capacity_df,
-            country_id=country_id,
-            categories=reference_categories,
-            years=profile_years,
-            smoothing_window=smoothing_window,
+        result.loc[undated.index] = assigned
+        source = (
+            "uniform"
+            if bool(profile["profile_fallback_used"].iloc[0])
+            else "positive_capacity_change"
         )
-
-        missing_capacity_mw = undated_group["output_capacity_mw"].sum()
-
-        allocation_profile = _build_clipped_residual_profile(
-            dated_df=dated_group,
-            profile=reference_profile,
-            allocatable_years=allocatable_years,
-            missing_capacity_mw=missing_capacity_mw,
-            year_col="start_year",
-        )
-
-        assigned_years = _allocate_start_years_by_residual_target(
-            undated_df=undated_group,
-            residual_target=allocation_profile["residual_target_mw"],
-            lifetimes=lifetimes,
-        )
-
-        result.loc[undated_group.index] = assigned_years
-
         profiles.append(
-            _complete_capacity_profile(
-                profile=allocation_profile,
-                undated_df=undated_group,
-                assigned_years=assigned_years,
+            _profile_rows(
+                allocation,
+                undated,
+                assigned,
                 country_id=country_id,
                 category=category,
-                reference_category=reference_category_label,
+                event_type="commissioning",
+                cohort="historical",
+                profile_source=source,
+                reference_category="+".join(categories),
             )
         )
 
-    profile_diagnostics = pd.concat(profiles, ignore_index=True)
+    return result, pd.concat(
+        profiles, ignore_index=True
+    ) if profiles else empty_profiles()
 
-    return result, profile_diagnostics
 
-
-def _impute_retired_dates_by_capacity_profile(
-    prepared_df: pd.DataFrame,
+def _impute_retired_dates(
+    plants: pd.DataFrame,
     reference_capacity_df: pd.DataFrame,
-    lifetimes: dict[str, int],
+    lifetimes: Mapping[str, int],
+    reference_category_mapping: Mapping[str, list[str]],
+    dataset_year: int,
 ) -> tuple[pd.Series, pd.Series, pd.DataFrame]:
-    """Impute dates for retired plants with neither date available."""
-    imputed_start_year = pd.Series(np.nan, index=prepared_df.index, dtype=float)
-    imputed_end_year = pd.Series(np.nan, index=prepared_df.index, dtype=float)
-    profiles = []
-
-    missing_mask = (
-        prepared_df["status"].eq(RETIRED)
-        & prepared_df["start_year"].isna()
-        & prepared_df["end_year"].isna()
+    """Impute both dates for retired plants with neither date available."""
+    start_result = pd.Series(np.nan, index=plants.index, dtype=float)
+    end_result = pd.Series(np.nan, index=plants.index, dtype=float)
+    profiles: list[pd.DataFrame] = []
+    missing = (
+        plants["status"].eq(RETIRED)
+        & plants["start_year"].isna()
+        & plants["end_year"].isna()
     )
 
-    if not missing_mask.any():
-        return (imputed_start_year, imputed_end_year, pd.DataFrame())
-
-    grouped_missing = prepared_df.loc[missing_mask].groupby(
-        ["country_id", "category"], dropna=False
-    )
-
-    for (country_id, category), undated_group in grouped_missing:
-        reference_categories = _reference_categories(category)
-        reference_category_label = "+".join(reference_categories)
-
-        group_mask = (
-            prepared_df["country_id"].eq(country_id)
-            & prepared_df["category"].eq(category)
-            & prepared_df["status"].eq(RETIRED)
+    for (country_id, category), undated in plants.loc[missing].groupby(
+        ["country_id", "category"]
+    ):
+        categories = reference_category_mapping[category]
+        group = plants["country_id"].eq(country_id) & plants["category"].eq(category)
+        dated = plants.loc[
+            group & plants["status"].eq(RETIRED) & plants["end_year"].notna()
+        ]
+        stock = _reference_capacity_stock(
+            reference_capacity_df, country_id, categories, dataset_year - 1
         )
-
-        dated_group = prepared_df.loc[
-            group_mask & prepared_df["end_year"].notna()
-        ].copy()
-
-        reference_first_year = _reference_first_year(
-            reference_capacity_df=reference_capacity_df,
-            country_id=country_id,
-            categories=reference_categories,
-            max_year=_utils.DATASET_YEAR - 1,
+        reference_first = _first_reported_year(stock)
+        observed_first = int(dated["end_year"].min()) if not dated.empty else None
+        fallback_first = dataset_year - undated["technology"].map(lifetimes).max()
+        first_year = min(
+            year
+            for year in (reference_first, observed_first, fallback_first)
+            if year is not None
         )
-
-        observed_first_year = (
-            int(dated_group["end_year"].min())
-            if not dated_group.empty
-            else reference_first_year
+        years = pd.Index(range(first_year, dataset_year), name="end_year")
+        profile = _build_reference_profile(
+            reference_capacity_df, country_id, categories, years, "retirement"
         )
-
-        first_profile_year = min(reference_first_year, observed_first_year)
-
-        profile_years = pd.Index(
-            range(first_profile_year, _utils.DATASET_YEAR), name="end_year"
-        )
-
-        # Missing retirements are allocated only within the period covered
-        # by the reference capacity series.
+        # Missing retirements are normally restricted to the period covered by
+        # the country's reference series. Without coverage, the lifetime-based
+        # fallback period supplies the allocation window.
         allocatable_years = pd.Index(
-            range(reference_first_year, _utils.DATASET_YEAR), name="end_year"
+            range(reference_first or first_year, dataset_year), name="end_year"
         )
+        profile_source = "negative_capacity_change"
 
-        reference_profile = _build_reference_retirement_profile(
-            reference_capacity_df=reference_capacity_df,
-            country_id=country_id,
-            categories=reference_categories,
-            years=profile_years,
-        )
-
-        reference_profile["profile_source"] = "negative_capacity_change"
-
-        # Where the reference stock contains no reductions, use the timing of
-        # already dated retired plants as the retirement-profile basis.
-        if reference_profile["profile_fallback_used"].iloc[0]:
-            observed_retirement_basis = (
-                dated_group.groupby("end_year")["output_capacity_mw"]
+        if bool(profile["profile_fallback_used"].iloc[0]):
+            # When stock history contains no reductions, observed retirement
+            # timing is more informative than a uniform fallback. It may also
+            # legitimately precede the reference-series coverage.
+            observed_basis = (
+                dated.groupby("end_year")["output_capacity_mw"]
                 .sum()
-                .reindex(profile_years, fill_value=0.0)
+                .reindex(years, fill_value=0.0)
             )
-
-            if observed_retirement_basis.sum() > 0:
-                reference_profile["reference_profile_basis_mw"] = (
-                    observed_retirement_basis
+            if observed_basis.sum() > 0:
+                profile["reference_profile_weight"] = (
+                    observed_basis / observed_basis.sum()
                 )
-                reference_profile["reference_profile_weight"] = (
-                    observed_retirement_basis / observed_retirement_basis.sum()
-                )
-                reference_profile["profile_source"] = "observed_retirements"
-
-                # Observed retirement dates may precede the reference series.
-                allocatable_years = profile_years
+                profile_source = "observed_retirements"
+                allocatable_years = years
             else:
-                reference_profile["profile_source"] = "uniform"
+                profile_source = "uniform"
 
-        missing_capacity_mw = undated_group["output_capacity_mw"].sum()
-
-        allocation_profile = _build_clipped_residual_profile(
-            dated_df=dated_group,
-            profile=reference_profile,
-            allocatable_years=allocatable_years,
-            missing_capacity_mw=missing_capacity_mw,
-            year_col="end_year",
+        allocation = _build_residual_profile(
+            dated,
+            profile,
+            allocatable_years,
+            undated["output_capacity_mw"].sum(),
+            "end_year",
         )
-
-        assigned_end_years = _allocate_years_by_target(
-            undated_df=undated_group,
-            target=allocation_profile["residual_target_mw"],
-            prefer_later_years=True,
+        assigned_end = _allocate_years_by_target(
+            undated, allocation["residual_target_mw"], prefer_later_years=True
         )
-
-        assigned_start_years = assigned_end_years - undated_group["technology"].map(
-            lifetimes
-        )
-
-        imputed_end_year.loc[undated_group.index] = assigned_end_years
-        imputed_start_year.loc[undated_group.index] = assigned_start_years
-
+        assigned_start = assigned_end - undated["technology"].map(lifetimes)
+        start_result.loc[undated.index] = assigned_start
+        end_result.loc[undated.index] = assigned_end
         profiles.append(
-            _complete_retirement_profile(
-                profile=allocation_profile,
-                undated_df=undated_group,
-                assigned_end_years=assigned_end_years,
+            _profile_rows(
+                allocation,
+                undated,
+                assigned_end,
                 country_id=country_id,
                 category=category,
-                reference_category=reference_category_label,
+                event_type="retirement",
+                cohort="historical",
+                profile_source=profile_source,
+                reference_category="+".join(categories),
             )
         )
 
-    retirement_profiles = pd.concat(profiles, ignore_index=True)
-
-    return (imputed_start_year, imputed_end_year, retirement_profiles)
+    combined = pd.concat(profiles, ignore_index=True) if profiles else empty_profiles()
+    return start_result, end_result, combined
 
 
 def _impute_planned_start_years(
-    prepared_df: pd.DataFrame,
-    planned_commissioning_year_windows: dict[str, dict[str, list[int]]],
+    plants: pd.DataFrame,
+    windows: Mapping[str, Mapping[str, list[int]]],
+    dataset_year: int,
 ) -> tuple[pd.Series, pd.Series, pd.DataFrame]:
-    """Impute missing planned start years using flat capacity targets."""
-    imputed_start_year = pd.Series(np.nan, index=prepared_df.index, dtype=float)
-    source_type = pd.Series(pd.NA, index=prepared_df.index, dtype="object")
-    profiles = []
+    """Impute missing planned start years within configured flat windows."""
+    years_result = pd.Series(np.nan, index=plants.index, dtype=float)
+    source_result = pd.Series(pd.NA, index=plants.index, dtype="object")
+    profiles: list[pd.DataFrame] = []
+    missing = plants["status"].isin(PLANNED) & plants["start_year"].isna()
 
-    missing_mask = (
-        prepared_df["status"].isin(PLANNED) & prepared_df["start_year"].isna()
-    )
-
-    if not missing_mask.any():
-        return (imputed_start_year, source_type, pd.DataFrame())
-
-    grouped_missing = prepared_df.loc[missing_mask].groupby(
-        ["country_id", "category", "technology", "status"], dropna=False
-    )
-
-    for (country_id, category, technology, status), undated_group in grouped_missing:
-        lower_offset, upper_offset = planned_commissioning_year_windows[technology][
-            status
-        ]
-
+    for (country_id, category, technology, status), undated in plants.loc[
+        missing
+    ].groupby(["country_id", "category", "technology", "status"]):
+        # Planned projects follow status- and technology-specific future
+        # windows rather than historical commissioning trends.
+        lower, upper = windows[technology][status]
         years = pd.Index(
-            range(
-                _utils.DATASET_YEAR + lower_offset,
-                _utils.DATASET_YEAR + upper_offset + 1,
-            ),
-            name="year",
+            range(dataset_year + lower, dataset_year + upper + 1), name="year"
         )
-
-        missing_capacity_mw = undated_group["output_capacity_mw"].sum()
-
-        flat_target = pd.Series(
-            missing_capacity_mw / len(years),
-            index=years,
-            dtype=float,
-            name="target_imputed_mw",
+        target = pd.Series(
+            undated["output_capacity_mw"].sum() / len(years), index=years
         )
+        assigned = _allocate_years_by_target(undated, target)
+        years_result.loc[undated.index] = assigned
+        source_result.loc[undated.index] = f"imputed_{status.replace('-', '_')}_window"
 
-        assigned_years = _allocate_years_by_target(
-            undated_df=undated_group, target=flat_target
+        profile = pd.DataFrame(
+            {"target_final_mw": target, "observed_mw": 0.0}, index=years
         )
-
-        imputed_start_year.loc[undated_group.index] = assigned_years
-
-        source_type.loc[undated_group.index] = (
-            f"imputed_{status.replace('-', '_')}_window"
-        )
-
         profiles.append(
-            _complete_planned_commissioning_profile(
-                undated_df=undated_group,
-                assigned_years=assigned_years,
-                target=flat_target,
+            _profile_rows(
+                profile,
+                undated,
+                assigned,
                 country_id=country_id,
                 category=category,
+                event_type="commissioning",
+                cohort="planned",
+                profile_source="uniform_window",
                 technology=technology,
                 status=status,
             )
         )
 
-    profile_diagnostics = pd.concat(profiles, ignore_index=True)
+    combined = pd.concat(profiles, ignore_index=True) if profiles else empty_profiles()
+    return years_result, source_result, combined
 
-    return (imputed_start_year, source_type, profile_diagnostics)
 
-
-def _impute_remaining_start_years(
-    prepared_df: pd.DataFrame,
+def _impute_start_years(
+    plants: pd.DataFrame,
     reference_capacity_df: pd.DataFrame,
-    lifetimes: dict[str, int],
-    method: str = "capacity_profile",
-) -> tuple[pd.Series, pd.DataFrame]:
-    """Impute start years that remain missing after direct backfilling."""
-    if method != "capacity_profile":
-        raise ValueError(
-            "Unknown start-year imputation method "
-            f"{method!r}. Expected 'capacity_profile'."
-        )
+    lifetimes: Mapping[str, int],
+    windows: Mapping[str, Mapping[str, list[int]]],
+    method: str,
+    reference_category_mapping: Mapping[str, list[str]],
+    dataset_year: int,
+) -> tuple[pd.Series, pd.Series, pd.DataFrame]:
+    """Impute missing start years and record their sources."""
+    start_year = plants["start_year"].copy()
+    source_type = _initial_year_source_type(start_year)
+    lifetime = plants["technology"].map(lifetimes)
 
-    return _impute_start_years_by_capacity_profile(
-        prepared_df, reference_capacity_df=reference_capacity_df, lifetimes=lifetimes
+    # A known end year and configured lifetime give the strongest direct
+    # start-year derivation, so apply it before any profile-based allocation.
+    direct = start_year.isna() & plants["end_year"].notna()
+    start_year.loc[direct] = plants.loc[direct, "end_year"] - lifetime.loc[direct]
+    source_type.loc[direct] = "derived_from_end_year"
+
+    # Planned projects are imputed independently across their configured windows
+    # Only their missing capacity is distributed.
+    working = plants.copy()
+    working["start_year"] = start_year
+    planned_year, planned_source, planned_profiles = _impute_planned_start_years(
+        working, windows, dataset_year
     )
+    planned = start_year.isna() & planned_year.notna()
+    start_year.loc[planned] = planned_year.loc[planned]
+    source_type.loc[planned] = planned_source.loc[planned]
 
-
-def _impute_start_year(
-    prepared_df: pd.DataFrame,
-    reference_capacity_df: pd.DataFrame,
-    lifetimes: dict[str, int],
-    planned_commissioning_year_windows: dict[str, dict[str, list[int]]],
-    method: str = "capacity_profile",
-) -> tuple[pd.Series, pd.Series, pd.DataFrame, pd.DataFrame]:
-    """Impute missing powerplant start years and track source labels."""
-    start_year = prepared_df["start_year"].copy()
-    start_year_source_type = _initial_year_source_type(start_year)
-    lifetime = prepared_df["technology"].map(lifetimes)
-
-    # First, preserve the direct deterministic backfill from known end year.
-    direct_backfill_mask = start_year.isna() & prepared_df["end_year"].notna()
-    start_year.loc[direct_backfill_mask] = (
-        prepared_df.loc[direct_backfill_mask, "end_year"]
-        - lifetime.loc[direct_backfill_mask]
+    # Apply the configured historical strategy only after direct and planned
+    # derivations have filled everything they can.
+    working["start_year"] = start_year
+    strategies = {"capacity_profile": _impute_operating_start_years}
+    historical_year, historical_profiles = strategies[method](
+        working,
+        reference_capacity_df,
+        lifetimes,
+        reference_category_mapping,
+        dataset_year,
     )
-    start_year_source_type.loc[direct_backfill_mask] = "derived_from_end_year"
+    historical = start_year.isna() & historical_year.notna()
+    start_year.loc[historical] = historical_year.loc[historical]
+    source_type.loc[historical] = f"imputed_{method}"
 
-    historical_profile_diagnostics = pd.DataFrame()
-    planned_profile_diagnostics = pd.DataFrame()
-
-    # Impute planned projects independently of historical start-year
-    # methods. Only the missing planned capacity is distributed across
-    # the configured technology- and status-specific window.
-    planned_imputation_df = prepared_df.copy()
-    planned_imputation_df["start_year"] = start_year
-
-    (planned_start_year, planned_source_type, planned_profile_diagnostics) = (
-        _impute_planned_start_years(
-            prepared_df=planned_imputation_df,
-            planned_commissioning_year_windows=(planned_commissioning_year_windows),
-        )
-    )
-
-    planned_imputed_mask = start_year.isna() & planned_start_year.notna()
-
-    start_year.loc[planned_imputed_mask] = planned_start_year.loc[planned_imputed_mask]
-    start_year_source_type.loc[planned_imputed_mask] = planned_source_type.loc[
-        planned_imputed_mask
+    profile_parts = [
+        profile
+        for profile in (historical_profiles, planned_profiles)
+        if not profile.empty
     ]
-
-    # Apply the configured historical method only to historical plants
-    # that still have no start year.
-    historical_missing_mask = start_year.isna() & prepared_df["status"].isin(HISTORICAL)
-
-    if historical_missing_mask.any():
-        imputation_df = prepared_df.copy()
-        imputation_df["start_year"] = start_year
-
-        (historical_start_year, historical_profile_diagnostics) = (
-            _impute_remaining_start_years(
-                imputation_df,
-                reference_capacity_df=reference_capacity_df,
-                lifetimes=lifetimes,
-                method=method,
-            )
-        )
-
-        historical_imputed_mask = (
-            historical_missing_mask & historical_start_year.notna()
-        )
-
-        start_year.loc[historical_imputed_mask] = historical_start_year.loc[
-            historical_imputed_mask
-        ]
-        start_year_source_type.loc[historical_imputed_mask] = f"imputed_{method}"
-
-    return (
-        start_year,
-        start_year_source_type,
-        historical_profile_diagnostics,
-        planned_profile_diagnostics,
+    profiles = (
+        pd.concat(profile_parts, ignore_index=True).reindex(columns=PROFILE_COLUMNS)
+        if profile_parts
+        else empty_profiles()
     )
+    return start_year, source_type, profiles
 
 
-def _impute_end_year(
-    df: pd.DataFrame, lifetimes: dict[str, int], delay: dict[str, int]
+def _impute_end_years(
+    plants: pd.DataFrame,
+    lifetimes: Mapping[str, int],
+    delays: Mapping[str, int],
+    dataset_year: int,
 ) -> tuple[pd.Series, pd.Series]:
-    """Impute end_year using lifetime and track source labels.
+    """Derive missing end years from lifetimes and record their sources."""
+    end_year = plants["end_year"].copy()
+    source_type = _initial_year_source_type(end_year)
+    expected_end = plants["start_year"] + plants["technology"].map(lifetimes)
+    derived = end_year.isna() & expected_end.notna()
+    end_year.loc[derived] = expected_end.loc[derived]
+    source_type.loc[derived] = "derived_from_start_year_lifetime"
 
-    Old plants operating beyond lifetime will be retired with a given delay.
-    """
-    ref_year = _utils.DATASET_YEAR
-
-    end_year = df["end_year"].copy()
-    end_year_source_type = _initial_year_source_type(end_year)
-
-    expected_end = df["start_year"] + df["technology"].map(lifetimes)
-
-    lifetime_fill_mask = end_year.isna() & expected_end.notna()
-    result = end_year.copy()
-    result.loc[lifetime_fill_mask] = expected_end.loc[lifetime_fill_mask]
-    end_year_source_type.loc[lifetime_fill_mask] = "derived_from_start_year_lifetime"
-
-    # Cap lifetime-derived end years so that plants recorded as retired
-    # end before the dataset year.
-    retired_lifetime_fill_mask = lifetime_fill_mask & df["status"].eq(RETIRED)
-    retired_end_capped_mask = retired_lifetime_fill_mask & result.ge(ref_year)
-    result.loc[retired_end_capped_mask] = ref_year - 1
-    end_year_source_type.loc[retired_end_capped_mask] = (
+    # Only derived dates may be adjusted: known start/end years remain sacred.
+    # A lifetime-derived retirement for a retired plant must precede the dataset.
+    retired_cap = derived & plants["status"].eq(RETIRED) & end_year.ge(dataset_year)
+    end_year.loc[retired_cap] = dataset_year - 1
+    source_type.loc[retired_cap] = (
         "derived_from_start_year_lifetime_capped_to_retired_status"
     )
 
-    # Plants operating beyond expected lifetime will be retired after a delay
-    # of >=1 yr.
-    needs_delay = (result <= ref_year) & (df["status"].eq(OPERATING))
-    delayed_end = result + df["technology"].map(delay).fillna(0).astype(int)
-    delayed_end = delayed_end.clip(lower=ref_year + 1)
+    # An operating plant that outlived its assumed lifetime receives the
+    # configured extension, with at least one year beyond the dataset year.
+    delayed = derived & plants["status"].eq(OPERATING) & end_year.le(dataset_year)
+    end_year.loc[delayed] = (
+        end_year.loc[delayed] + plants.loc[delayed, "technology"].map(delays)
+    ).clip(lower=dataset_year + 1)
+    source_type.loc[delayed] = "derived_from_start_year_lifetime_with_retirement_delay"
+    return end_year, source_type
 
-    result.loc[needs_delay] = delayed_end.loc[needs_delay]
 
-    end_year_source_type.loc[needs_delay & lifetime_fill_mask] = (
-        "derived_from_start_year_lifetime_with_retirement_delay"
+def _status_for_scenario(plants: pd.DataFrame, dataset_year: int) -> pd.Series:
+    """Reconcile decisive observed dates without modifying them."""
+    status = plants["status"].copy()
+
+    # Observed retirement years are the strongest status signal. This happens
+    # before scenario filtering so completed plants remain historical assets.
+    retired = plants["end_year"].notna() & plants["end_year"].le(dataset_year)
+    status.loc[retired] = RETIRED
+
+    operating = (
+        ~retired
+        & plants["start_year"].notna()
+        & plants["start_year"].le(dataset_year)
+        & plants["end_year"].notna()
+        & plants["end_year"].gt(dataset_year)
     )
+    status.loc[operating] = OPERATING
 
-    end_year_source_type.loc[needs_delay & ~lifetime_fill_mask] = (
-        "observed_adjusted_with_retirement_delay"
+    # A future observed start contradicts a historical status. Treat it as
+    # construction for scenario eligibility and later collapse it to planned.
+    future_historical = (
+        ~retired
+        & plants["start_year"].notna()
+        & plants["start_year"].gt(dataset_year)
+        & status.isin(HISTORICAL)
     )
-
-    return result, end_year_source_type
-
-
-def _reconcile_status_from_observed_dates(df: pd.DataFrame) -> pd.Series:
-    """Correct status before imputation where observed dates are decisive.
-
-    This function deliberately uses only the dates already present in the
-    input data. Observed retirement years are treated as the strongest signal:
-    if an observed end year is on or before the dataset year, the plant is
-    treated as retired before any lifetime or retirement-delay logic is
-    applied.
-
-    Observed future start years are left in their original development stage
-    at this point. They are later collapsed to the final "planned" status after
-    complete start and end years have been assigned.
-    """
-    ref_year = _utils.DATASET_YEAR
-
-    corrected_status = df["status"].copy()
-
-    observed_start_year = df["start_year"]
-    observed_end_year = df["end_year"]
-
-    retired_from_observed_end = observed_end_year.notna() & observed_end_year.le(
-        ref_year
-    )
-    corrected_status.loc[retired_from_observed_end] = RETIRED
-
-    operating_from_observed_dates = (
-        ~retired_from_observed_end
-        & observed_start_year.notna()
-        & observed_start_year.le(ref_year)
-        & observed_end_year.notna()
-        & observed_end_year.gt(ref_year)
-    )
-    corrected_status.loc[operating_from_observed_dates] = OPERATING
-
-    return corrected_status
-
-
-def _impute_status(df: pd.DataFrame) -> pd.Series:
-    """Derive final temporal status after start/end years are complete."""
-    status = df["status"].copy()
-    ref_year = _utils.DATASET_YEAR
-    status.loc[ref_year < df["start_year"]] = "planned"
-    status.loc[(df["start_year"] <= ref_year) & (ref_year < df["end_year"])] = OPERATING
-    status.loc[df["end_year"] <= ref_year] = RETIRED
-
-    if status.isna().any():
-        raise ValueError("Entries with ambiguous states were left in the dataframe.")
-
+    status.loc[future_historical] = "construction"
     return status
+
+
+def _final_status(plants: pd.DataFrame, dataset_year: int) -> pd.Series:
+    """Derive final temporal status from completed start and end years."""
+    status = plants["status"].copy()
+    status.loc[plants["start_year"].gt(dataset_year)] = "planned"
+    status.loc[
+        plants["start_year"].le(dataset_year) & plants["end_year"].gt(dataset_year)
+    ] = OPERATING
+    status.loc[plants["end_year"].le(dataset_year)] = RETIRED
+    return status
+
+
+def impute_dates(
+    plants: pd.DataFrame,
+    reference_capacity_df: pd.DataFrame,
+    imputation: Mapping,
+    reference_category_mapping: Mapping[str, list[str]],
+    dataset_year: int,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Impute missing dates and return plants plus normalized profile diagnostics."""
+    if plants.empty:
+        result = plants.copy()
+        result["start_year_source_type"] = pd.Series(dtype="object")
+        result["end_year_source_type"] = pd.Series(dtype="object")
+        return result, empty_profiles()
+
+    # Select the scenario after reconciling only contradictions established by
+    # observed dates. The dates themselves are never changed by this step.
+    status = _status_for_scenario(plants, dataset_year)
+    scenario_plants = plants.assign(status=status)
+    result = scenario_plants.loc[
+        scenario_plants["status"].isin(SCENARIO_MAP[imputation["scenario"]])
+    ].copy()
+
+    if result.empty:
+        result["start_year_source_type"] = pd.Series(dtype="object")
+        result["end_year_source_type"] = pd.Series(dtype="object")
+        return result, empty_profiles()
+
+    lifetimes = imputation["lifetime_years"]
+    result["start_year"], start_source, profiles = _impute_start_years(
+        result,
+        reference_capacity_df,
+        lifetimes,
+        imputation["planned_commissioning_year_windows"],
+        imputation["start_year_imputation_method"],
+        reference_category_mapping,
+        dataset_year,
+    )
+    result["end_year"], end_source = _impute_end_years(
+        result, lifetimes, imputation["retirement_delay_years"], dataset_year
+    )
+
+    # Retired plants with neither date require a retirement profile.
+    # Their start years are then derived from the imputed end and configured lifetime.
+    # Fixme: the profile should be used to fill the start year!
+    retired_start, retired_end, retirement_profiles = _impute_retired_dates(
+        result,
+        reference_capacity_df,
+        lifetimes,
+        reference_category_mapping,
+        dataset_year,
+    )
+    retired = retired_end.notna()
+    result.loc[retired, "start_year"] = retired_start.loc[retired]
+    result.loc[retired, "end_year"] = retired_end.loc[retired]
+    start_source.loc[retired] = "derived_from_imputed_retirement_end_year"
+    end_source.loc[retired] = "imputed_retirement_capacity_profile"
+
+    # Complete dates determine the temporal status. Preserve date
+    # provenance alongside the final plant output for diagnostics.
+    result["status"] = _final_status(result, dataset_year)
+    result["start_year_source_type"] = start_source
+    result["end_year_source_type"] = end_source
+    profile_parts = [
+        profile for profile in (profiles, retirement_profiles) if not profile.empty
+    ]
+    profiles = (
+        pd.concat(profile_parts, ignore_index=True).reindex(columns=PROFILE_COLUMNS)
+        if profile_parts
+        else empty_profiles()
+    )
+    return result, profiles
+
+
+def impute(
+    relocated_gdf: gpd.GeoDataFrame,
+    reference_capacity_df: pd.DataFrame,
+    imputation: dict,
+    technology_mapping: dict,
+) -> tuple[gpd.GeoDataFrame, pd.DataFrame]:
+    """Impute missing dates and return plants plus normalized profile diagnostics."""
+    if not relocated_gdf.empty:
+        _utils.check_single_category(relocated_gdf)
+
+    imputed, profiles = impute_dates(
+        relocated_gdf,
+        reference_capacity_df,
+        imputation,
+        reference_category_mapping=_utils.EIA_CAT_MAPPING,
+        dataset_year=_utils.DATASET_YEAR,
+    )
+    schema = _schemas.build_schema(technology_mapping, "impute")
+    return schema.validate(imputed), profiles
 
 
 CAPACITY_DATE_EVENT_COLUMNS = [
@@ -986,10 +752,7 @@ CAPACITY_DATE_EVENT_COLUMNS = [
 
 def _build_capacity_date_events(imputed: pd.DataFrame) -> pd.DataFrame:
     """Convert imputed plant dates into annual commissioning and retirement events."""
-    if imputed.empty:
-        return pd.DataFrame(columns=CAPACITY_DATE_EVENT_COLUMNS)
-
-    common_cols = [
+    common = [
         "powerplant_id",
         "name",
         "country_id",
@@ -998,30 +761,25 @@ def _build_capacity_date_events(imputed: pd.DataFrame) -> pd.DataFrame:
         "status",
         "output_capacity_mw",
     ]
+    events = []
+    for year_col, source_col, event_type, sign in (
+        ("start_year", "start_year_source_type", "commissioning", 1),
+        ("end_year", "end_year_source_type", "retirement", -1),
+    ):
+        event = imputed[common + [year_col, source_col]].rename(
+            columns={year_col: "year", source_col: "source_type"}
+        )
+        event["event_type"] = event_type
 
-    start_events = imputed[
-        common_cols + ["start_year", "start_year_source_type"]
-    ].rename(columns={"start_year": "year", "start_year_source_type": "source_type"})
-    start_events["event_type"] = "commissioning"
-    # Keep the plant capacity unchanged and create a signed event value for plotting:
-    # commissioning adds capacity, retirement removes capacity. This signed value is
-    # used only in the capacity-date-events diagnostic table.
-    start_events["capacity_change_mw"] = start_events["output_capacity_mw"]
+        # Keep plant capacity unchanged and add a signed event value solely for
+        # diagnostics: commissioning is positive and retirement is negative.
+        event["capacity_change_mw"] = sign * event["output_capacity_mw"]
+        events.append(event)
 
-    end_events = imputed[common_cols + ["end_year", "end_year_source_type"]].rename(
-        columns={"end_year": "year", "end_year_source_type": "source_type"}
-    )
-    end_events["event_type"] = "retirement"
-    # Retirements are represented as negative events so they can be plotted below
-    # zero without altering the original plant capacity.
-    end_events["capacity_change_mw"] = -end_events["output_capacity_mw"]
-
-    events = pd.concat([start_events, end_events], ignore_index=True)
-
-    events["source_label"] = events["source_type"].map(_utils.date_source_labels())
-
+    result = pd.concat(events, ignore_index=True)
+    result["source_label"] = result["source_type"].map(_utils.date_source_labels())
     return (
-        events[CAPACITY_DATE_EVENT_COLUMNS]
+        result[CAPACITY_DATE_EVENT_COLUMNS]
         .sort_values(
             ["country_id", "year", "event_type", "source_type", "powerplant_id"]
         )
@@ -1029,548 +787,284 @@ def _build_capacity_date_events(imputed: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def _get_time_imputation_colours() -> dict[str, tuple[float, float, float, float]]:
-    """Return colours for time-imputation source types."""
-    start_year_sources = _utils.date_source_types_for("start_year")
-    end_year_sources = _utils.date_source_types_for("end_year")
-
-    observed_sources = [
-        source
-        for source in _utils.DATE_SOURCE_METADATA
-        if source in start_year_sources & end_year_sources
-    ]
-    start_only_sources = [
-        source
-        for source in _utils.DATE_SOURCE_METADATA
-        if source in start_year_sources - end_year_sources
-    ]
-    end_only_sources = [
-        source
-        for source in _utils.DATE_SOURCE_METADATA
-        if source in end_year_sources - start_year_sources
-    ]
-
+def _time_imputation_colours() -> dict[str, ColorType]:
+    """Return colours for time imputation source types."""
+    start_sources = _utils.date_source_types_for("start_year")
+    end_sources = _utils.date_source_types_for("end_year")
+    ordered = _utils.DATE_SOURCE_METADATA
+    shared = [source for source in ordered if source in start_sources & end_sources]
+    start_only = [source for source in ordered if source in start_sources - end_sources]
+    end_only = [source for source in ordered if source in end_sources - start_sources]
     return (
-        _plots.get_colour_dict(
-            observed_sources, "colorbrewer:Greys", value_range=(0.4, 0.45)
-        )
+        _plots.get_colour_dict(shared, "colorbrewer:Greys", value_range=(0.4, 0.45))
         | _plots.get_colour_dict(
-            start_only_sources, "colorbrewer:Purples", value_range=(0.2, 0.9)
+            start_only, "colorbrewer:Purples", value_range=(0.2, 0.9)
         )
-        | _plots.get_colour_dict(
-            end_only_sources, "colorbrewer:Reds", value_range=(0.2, 0.9)
-        )
+        | _plots.get_colour_dict(end_only, "colorbrewer:Reds", value_range=(0.2, 0.9))
+    )
+
+
+def _profile_target(
+    profiles: pd.DataFrame, country: str, event_type: str, cohort: str
+) -> pd.DataFrame:
+    """Aggregate normalized diagnostic targets for plotting."""
+    if profiles.empty:
+        return pd.DataFrame(columns=["year", "target_mw"])
+    return (
+        profiles.loc[
+            profiles["country_id"].eq(country)
+            & profiles["event_type"].eq(event_type)
+            & profiles["cohort"].eq(cohort)
+        ]
+        .groupby("year", as_index=False)["target_mw"]
+        .sum()
+        .sort_values("year")
     )
 
 
 def plot_capacity_date_events(
-    events_df: pd.DataFrame,
-    commissioning_profile_df: pd.DataFrame,
-    retirement_profile_df: pd.DataFrame,
-    planned_profile_df: pd.DataFrame,
-    output_path: str,
-    cat: str,
+    events: pd.DataFrame, profiles: pd.DataFrame, output_path: str, category: str
 ) -> None:
-    """Plot commissioning and retirement events by date-source method."""
-    display_category = cat.replace("_", " ")
-    suptitle = f"Capacity-date imputation for {display_category}"
-
-    country_sets = []
-
-    for dataframe in [
-        events_df,
-        commissioning_profile_df,
-        retirement_profile_df,
-        planned_profile_df,
-    ]:
-        if not dataframe.empty:
-            country_sets.extend(dataframe["country_id"].unique())
-
-    countries = sorted(set(country_sets))
-
+    """Plot commissioning and retirement events by date provenance."""
+    title = f"Capacity-date imputation for {category.replace('_', ' ')}"
+    countries = sorted(
+        set(events["country_id"] if not events.empty else [])
+        | set(profiles["country_id"] if not profiles.empty else [])
+    )
     if not countries:
-        _plots.plot_empty(suptitle, output_path)
+        _plots.plot_empty(title, output_path)
         return
 
-    present_source_types = events_df["source_type"].unique().tolist()
-
-    unknown_source_types = set(present_source_types) - set(_utils.DATE_SOURCE_METADATA)
-
-    if unknown_source_types:
-        raise ValueError(
-            f"Missing DATE_SOURCE_METADATA entries for: {sorted(unknown_source_types)}"
-        )
-
+    present_sources = set(events["source_type"])
     source_types = [
-        source_type
-        for source_type in _utils.DATE_SOURCE_METADATA
-        if source_type in present_source_types
+        source for source in _utils.DATE_SOURCE_METADATA if source in present_sources
     ]
-
-    source_colors = _get_time_imputation_colours()
-
-    n_countries = len(countries)
-    cols = 2 if n_countries > 1 else 1
-    rows = math.ceil(n_countries / cols)
-
+    colours = _time_imputation_colours()
+    cols = 2 if len(countries) > 1 else 1
+    rows = math.ceil(len(countries) / cols)
     fig, axes = plt.subplots(
-        rows,
-        cols,
-        figsize=(cols * 7, rows * 4.5),
-        sharex=False,
-        sharey=False,
-        constrained_layout=True,
+        rows, cols, figsize=(cols * 7, rows * 4.5), constrained_layout=True
     )
     axes_flat = np.array(axes).ravel()
 
-    for ax, country in zip(axes_flat, countries):
-        country_events = events_df.loc[events_df["country_id"].eq(country)].copy()
+    profile_kinds = (
+        ("commissioning", "historical", 1, "0.15", "-"),
+        ("retirement", "historical", -1, "0.15", ":"),
+        ("commissioning", "planned", 1, "0.35", "--"),
+    )
+    any_profile = {kind[:2]: False for kind in profile_kinds}
 
-        commissioning_target = (
-            commissioning_profile_df.loc[
-                commissioning_profile_df["country_id"].eq(country)
-            ].copy()
-            if not commissioning_profile_df.empty
-            else pd.DataFrame()
-        )
-
-        retirement_target = (
-            retirement_profile_df.loc[
-                retirement_profile_df["country_id"].eq(country)
-            ].copy()
-            if not retirement_profile_df.empty
-            else pd.DataFrame()
-        )
-
-        planned_target = (
-            planned_profile_df.loc[planned_profile_df["country_id"].eq(country)].copy()
-            if not planned_profile_df.empty
-            else pd.DataFrame()
-        )
-
+    for ax, country in zip(axes_flat, countries, strict=False):
+        country_events = events.loc[events["country_id"].eq(country)]
+        targets = {
+            (event_type, cohort): _profile_target(profiles, country, event_type, cohort)
+            for event_type, cohort, *_ in profile_kinds
+        }
         year_values = set(country_events["year"].astype(int))
-
-        if not commissioning_target.empty:
-            year_values.update(commissioning_target["year"].astype(int))
-
-        if not retirement_target.empty:
-            year_values.update(retirement_target["year"].astype(int))
-
-        if not planned_target.empty:
-            year_values.update(planned_target["year"].astype(int))
-
+        for target in targets.values():
+            year_values.update(target["year"].astype(int))
         years = np.array(sorted(year_values))
-
-        if len(years) == 0:
+        if not len(years):
             _plots.draw_empty(ax, country, f"No date events for {country}")
             continue
 
-        country_events["year"] = country_events["year"].astype(int)
-
-        annual_events = country_events.groupby(
-            ["year", "event_type", "source_type"], as_index=False
-        )["capacity_change_mw"].sum()
-
+        annual = (
+            country_events.assign(year=country_events["year"].astype(int))
+            .groupby(["year", "event_type", "source_type"])["capacity_change_mw"]
+            .sum()
+        )
         positive_bottom = np.zeros(len(years))
         negative_bottom = np.zeros(len(years))
+        for source in source_types:
+            values = {}
+            for event_type in ("commissioning", "retirement"):
+                try:
+                    series = annual.xs((event_type, source), level=(1, 2))
+                except KeyError:
+                    series = pd.Series(dtype=float)
+                values[event_type] = series.reindex(years, fill_value=0).to_numpy()
 
-        for source_type in source_types:
-            commissioning_values = (
-                annual_events.loc[
-                    annual_events["source_type"].eq(source_type)
-                    & annual_events["event_type"].eq("commissioning")
-                ]
-                .set_index("year")["capacity_change_mw"]
-                .reindex(years, fill_value=0.0)
-                .to_numpy()
-            )
-
-            retirement_values = (
-                annual_events.loc[
-                    annual_events["source_type"].eq(source_type)
-                    & annual_events["event_type"].eq("retirement")
-                ]
-                .set_index("year")["capacity_change_mw"]
-                .reindex(years, fill_value=0.0)
-                .to_numpy()
-            )
-
-            if commissioning_values.any():
+            if values["commissioning"].any():
                 ax.bar(
                     years,
-                    commissioning_values,
+                    values["commissioning"],
                     bottom=positive_bottom,
-                    color=source_colors[source_type],
+                    color=colours[source],
                     width=0.9,
                 )
-
-            if retirement_values.any():
+            if values["retirement"].any():
                 ax.bar(
                     years,
-                    retirement_values,
+                    values["retirement"],
                     bottom=negative_bottom,
-                    color=source_colors[source_type],
+                    color=colours[source],
                     width=0.9,
                 )
+            positive_bottom += values["commissioning"]
+            negative_bottom += values["retirement"]
 
-            positive_bottom += commissioning_values
-            negative_bottom += retirement_values
-
-        if not commissioning_target.empty:
-            commissioning_target = commissioning_target.sort_values("year")
-
-            ax.plot(
-                commissioning_target["year"],
-                commissioning_target["target_final_mw"],
-                color="0.15",
-                linewidth=2,
-            )
-
-        if not retirement_target.empty:
-            retirement_target = retirement_target.sort_values("year")
-
-            ax.plot(
-                retirement_target["year"],
-                -retirement_target["target_final_mw"],
-                color="0.15",
-                linewidth=2,
-                linestyle=":",
-            )
-
-        if not planned_target.empty:
-            planned_target = (
-                planned_target.groupby("year", as_index=False)["target_imputed_mw"]
-                .sum()
-                .sort_values("year")
-            )
-
-            ax.plot(
-                planned_target["year"],
-                planned_target["target_imputed_mw"],
-                color="0.35",
-                linewidth=2,
-                linestyle="--",
-            )
+        for event_type, cohort, sign, colour, linestyle in profile_kinds:
+            target = targets[event_type, cohort]
+            if not target.empty:
+                any_profile[event_type, cohort] = True
+                ax.plot(
+                    target["year"],
+                    sign * target["target_mw"],
+                    color=colour,
+                    linewidth=2,
+                    linestyle=linestyle,
+                )
 
         ax.axhline(0, color="0.35", linewidth=0.8)
-        ax.set_title(country)
-        ax.set_xlabel("Year")
-        ax.set_ylabel("Annual capacity event (MW)")
+        ax.set(title=country, xlabel="Year", ylabel="Annual capacity event (MW)")
         ax.locator_params(axis="x", nbins=12)
         ax.tick_params(axis="x", rotation=45)
         ax.minorticks_off()
 
-    for ax in axes_flat[n_countries:]:
+    for ax in axes_flat[len(countries) :]:
         ax.set_visible(False)
 
-    legend_handles = [
+    handles: list[Patch | Line2D] = [
         Patch(
-            facecolor=source_colors[source_type],
-            label=_utils.DATE_SOURCE_METADATA[source_type]["label"],
+            facecolor=colours[source],
+            label=_utils.DATE_SOURCE_METADATA[source]["label"],
         )
-        for source_type in source_types
+        for source in source_types
     ]
-
-    if not commissioning_profile_df.empty:
-        legend_handles.append(
-            Line2D(
-                [0],
-                [0],
-                color="0.15",
-                linewidth=2,
-                label="Commissioning profile for historic assets",
+    profile_labels = {
+        ("commissioning", "historical"): "Commissioning profile for historic assets",
+        ("retirement", "historical"): "Retirement profile for historic assets",
+        ("commissioning", "planned"): "Commissioning profile for planned assets",
+    }
+    for event_type, cohort, _, colour, linestyle in profile_kinds:
+        if any_profile[event_type, cohort]:
+            handles.append(
+                Line2D(
+                    [0],
+                    [0],
+                    color=colour,
+                    linewidth=2,
+                    linestyle=linestyle,
+                    label=profile_labels[event_type, cohort],
+                )
             )
-        )
-
-    if not retirement_profile_df.empty:
-        legend_handles.append(
-            Line2D(
-                [0],
-                [0],
-                color="0.15",
-                linewidth=2,
-                linestyle=":",
-                label="Retirement profile for historic assets",
-            )
-        )
-
-    if not planned_profile_df.empty:
-        legend_handles.append(
-            Line2D(
-                [0],
-                [0],
-                color="0.35",
-                linewidth=2,
-                linestyle="--",
-                label="Commissioning profile for planned assets",
-            )
-        )
-
     fig.legend(
-        handles=legend_handles,
-        loc="center left",
-        bbox_to_anchor=(1.0, 0.5),
-        frameon=False,
+        handles=handles, loc="center left", bbox_to_anchor=(1, 0.5), frameon=False
     )
-    fig.suptitle(suptitle, fontsize=14)
-
+    fig.suptitle(title, fontsize=14)
     fig.savefig(output_path, bbox_inches="tight")
     plt.close(fig)
 
 
-def impute(
-    relocated_gdf: gpd.GeoDataFrame,
-    reference_capacity_df: pd.DataFrame,
-    imputation: dict,
-    technology_mapping: dict,
-) -> tuple[gpd.GeoDataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Add automatic and user imputations to fill missing data.
-
-    Args:
-        relocated_gdf: Relocated powerplants with country identifiers.
-        reference_capacity_df: Annual category-level capacity stock data.
-        imputation: Imputation configuration.
-        technology_mapping: Technology-mapping configuration.
-    """
-    commissioning_profile_df = pd.DataFrame()
-    retirement_profile_df = pd.DataFrame()
-    planned_profile_df = pd.DataFrame()
-
-    _utils.check_single_category(relocated_gdf)
-
-    lifetimes = imputation["lifetime_years"]
-    planned_commissioning_year_windows = imputation[
-        "planned_commissioning_year_windows"
-    ]
-    retirement_delay_years = imputation["retirement_delay_years"]
-    scenario = SCENARIO_MAP[imputation["scenario"]]
-    start_year_imputation_method = imputation["start_year_imputation_method"]
-
-    status_after_observed_date_correction = _reconcile_status_from_observed_dates(
-        relocated_gdf
-    )
-
-    # Get facilities within the requested scenario after correcting only
-    # the statuses that are already contradicted by observed dates.
-    scenario_gdf = relocated_gdf.copy()
-    scenario_gdf["status"] = status_after_observed_date_correction
-
-    imputed = scenario_gdf[scenario_gdf["status"].isin(scenario)].copy()
-
-    if not imputed.empty:
-        (
-            imputed["start_year"],
-            start_year_source_type,
-            commissioning_profile_df,
-            planned_profile_df,
-        ) = _impute_start_year(
-            prepared_df=imputed,
-            reference_capacity_df=reference_capacity_df,
-            lifetimes=lifetimes,
-            planned_commissioning_year_windows=(planned_commissioning_year_windows),
-            method=start_year_imputation_method,
-        )
-
-        imputed["end_year"], end_year_source_type = _impute_end_year(
-            imputed, lifetimes, retirement_delay_years
-        )
-
-        retired_start_year, retired_end_year, retirement_profile_df = (
-            _impute_retired_dates_by_capacity_profile(
-                prepared_df=imputed,
-                reference_capacity_df=reference_capacity_df,
-                lifetimes=lifetimes,
-            )
-        )
-
-        retirement_imputed_mask = retired_end_year.notna()
-
-        imputed.loc[retirement_imputed_mask, "start_year"] = retired_start_year.loc[
-            retirement_imputed_mask
-        ]
-
-        imputed.loc[retirement_imputed_mask, "end_year"] = retired_end_year.loc[
-            retirement_imputed_mask
-        ]
-
-        start_year_source_type.loc[retirement_imputed_mask] = (
-            "derived_from_imputed_retirement_end_year"
-        )
-        end_year_source_type.loc[retirement_imputed_mask] = (
-            "imputed_retirement_capacity_profile"
-        )
-
-        has_complete_dates = imputed[["start_year", "end_year"]].notna().all(axis=1)
-
-        status_final = pd.Series(pd.NA, index=imputed.index, dtype="object")
-
-        if has_complete_dates.any():
-            status_final.loc[has_complete_dates] = _impute_status(
-                imputed.loc[has_complete_dates]
-            )
-
-        # Drop projects with insufficient date data.
-        imputed = imputed.loc[has_complete_dates].copy()
-
-        # Update the powerplant status.
-        imputed["status"] = status_final.loc[imputed.index]
-
-        # Pass date-source provenance forward.
-        imputed["start_year_source_type"] = start_year_source_type.loc[imputed.index]
-        imputed["end_year_source_type"] = end_year_source_type.loc[imputed.index]
-    else:
-        imputed["start_year_source_type"] = pd.Series(dtype="object")
-        imputed["end_year_source_type"] = pd.Series(dtype="object")
-
-    schema = _schemas.build_schema(technology_mapping, "impute")
-    return (
-        schema.validate(imputed),
-        commissioning_profile_df,
-        retirement_profile_df,
-        planned_profile_df,
-    )
-
-
-def explore(imputed: gpd.GeoDataFrame, output_path: str, colormap="tab20"):
-    """Create a HTML map for users to explore."""
+def explore(
+    imputed: gpd.GeoDataFrame, output_path: str, colormap: str = "tab20"
+) -> None:
+    """Create an HTML map for users to explore."""
     if imputed.empty:
-        with open(output_path, "w") as f:
-            f.write("No data")
+        with open(output_path, "w", encoding="utf-8") as file:
+            file.write("No data")
     else:
-        explorer = imputed.explore(
+        imputed.explore(
             column="technology", legend=True, popup=True, cmap=colormap
-        )
-        explorer.save(output_path)
+        ).save(output_path)
 
 
 def plot_powerplant_capacity_buildup(
-    df: pd.DataFrame, output_path: str, colormap: str, cat: str = "powerplant"
-):
-    """Plot stacked bar charts of active powerplant capacity over time per country.
-
-    Input should be a powerplant capacity file of a single category.
-    """
-    suptitle = f"Active {cat} capacity by technology per country"
-
-    if df.empty:
-        _plots.plot_empty(suptitle, output_path)
+    plants: pd.DataFrame, output_path: str, colormap: str, category: str = "powerplant"
+) -> None:
+    """Plot active powerplant capacity over time per country and technology."""
+    title = f"Active {category} capacity by technology per country"
+    if plants.empty:
+        _plots.plot_empty(title, output_path)
         return
 
-    # Year range (x-axis)
-    start_year = df["start_year"].astype(int).min()
-    end_year = df["end_year"].astype(int).max()
-    years = list(range(start_year, end_year + 1))
-
-    # Layout (per country in alphabetical order)
-    countries = sorted(df["country_id"].unique())
-    n_countries = len(countries)
-    cols = 2 if n_countries > 1 else 1
-    rows = math.ceil(n_countries / cols)
-
-    # Tech type color range
-    tech_types = sorted(df["technology"].unique())
-    cmap = Colormap(colormap).to_mpl()
-    colors = [cmap(i) for i in np.linspace(0, 1, len(tech_types))]
-
-    # Figure (always 2 columns, flexible rows)
+    years = pd.Index(
+        range(int(plants["start_year"].min()), int(plants["end_year"].max()) + 1)
+    )
+    countries = sorted(plants["country_id"].unique())
+    technologies = sorted(plants["technology"].unique())
+    colours = _plots.get_colour_dict(technologies, colormap)
+    cols = 2 if len(countries) > 1 else 1
+    rows = math.ceil(len(countries) / cols)
     fig, axes = plt.subplots(
-        rows,
-        cols,
-        figsize=(cols * 5, rows * 4),
-        sharex=False,
-        sharey=False,
-        constrained_layout=True,
+        rows, cols, figsize=(cols * 5, rows * 4), constrained_layout=True
     )
     axes_flat = np.array(axes).ravel()
 
-    # Plot per country
-    for ax, country in zip(axes_flat, countries):
-        country_df = df[df["country_id"] == country]
-        if country_df.empty:
-            _plots.draw_empty(ax, country, f"No data for {country}")
-            continue
+    for ax, country in zip(axes_flat, countries, strict=False):
+        country_plants = plants.loc[plants["country_id"].eq(country)]
 
-        cap_mw = pd.DataFrame(0.0, index=years, columns=tech_types)
-        for year in years:
-            active = country_df[
-                (country_df["start_year"] <= year) & (year < country_df["end_year"])
-            ]
-            cap_mw.loc[year] = (
-                active.groupby("technology")["output_capacity_mw"]
-                .sum()
-                .reindex(tech_types, fill_value=0)
-            )
-
-        cap_mw.plot(kind="bar", stacked=True, ax=ax, color=colors, legend=False, rot=45)
+        # Represent each lifecycle as a positive commissioning event and a
+        # negative retirement event. Cumulative annual changes then give active
+        # capacity without rescanning every plant for every plotted year.
+        starts = country_plants.rename(columns={"start_year": "year"}).assign(
+            capacity_change_mw=country_plants["output_capacity_mw"]
+        )
+        ends = country_plants.rename(columns={"end_year": "year"}).assign(
+            capacity_change_mw=-country_plants["output_capacity_mw"]
+        )
+        changes = (
+            pd.concat([starts, ends])
+            .groupby(["year", "technology"])["capacity_change_mw"]
+            .sum()
+            .unstack(fill_value=0)
+            .reindex(index=years, columns=technologies, fill_value=0)
+        )
+        changes.cumsum().plot(
+            kind="bar",
+            stacked=True,
+            ax=ax,
+            color=[colours[technology] for technology in technologies],
+            legend=False,
+            rot=45,
+        )
         ax.set_title(country)
         ax.set_ylabel("Capacity (MW)")
         ax.locator_params(axis="x", nbins=10)
         ax.minorticks_off()
 
-    # Hide extra axes
-    for ax in axes_flat[n_countries:]:
+    for ax in axes_flat[len(countries) :]:
         ax.set_visible(False)
-
-    # Add details
     handles, labels = axes_flat[0].get_legend_handles_labels()
     fig.legend(
         handles[::-1],
         labels[::-1],
         loc="center left",
-        bbox_to_anchor=(1.0, 0.5),
+        bbox_to_anchor=(1, 0.5),
         title="Technology",
         frameon=False,
     )
-    fig.suptitle(suptitle, fontsize=14)
-
+    fig.suptitle(title, fontsize=14)
     fig.savefig(output_path, bbox_inches="tight")
+    plt.close(fig)
 
 
 def main() -> None:
     """Main snakemake process."""
-    relocated_gdf = gpd.read_parquet(snakemake.input.relocated)
-    reference_capacity_df = pd.read_parquet(snakemake.input.category_capacity)
-    if relocated_gdf.empty:
-        imputed_gdf = relocated_gdf
-        imputed_gdf["start_year_source_type"] = pd.Series(dtype="object")
-        imputed_gdf["end_year_source_type"] = pd.Series(dtype="object")
-        commissioning_profile_df = pd.DataFrame()
-        retirement_profile_df = pd.DataFrame()
-        planned_profile_df = pd.DataFrame()
-    else:
-        (
-            imputed_gdf,
-            commissioning_profile_df,
-            retirement_profile_df,
-            planned_profile_df,
-        ) = impute(
-            relocated_gdf=relocated_gdf,
-            reference_capacity_df=reference_capacity_df,
-            imputation=snakemake.params.imputation,
-            technology_mapping=snakemake.params.tech_map,
-        )
-    imputed_gdf.to_parquet(snakemake.output.aged)
-
-    capacity_date_events_df = _build_capacity_date_events(imputed_gdf)
-
-    capacity_date_events_df.to_parquet(
-        snakemake.output.capacity_date_events, index=False
+    imputed, profiles = impute(
+        relocated_gdf=gpd.read_parquet(snakemake.input.relocated),
+        reference_capacity_df=pd.read_parquet(snakemake.input.category_capacity),
+        imputation=snakemake.params.imputation,
+        technology_mapping=snakemake.params.tech_map,
     )
+    imputed.to_parquet(snakemake.output.aged)
 
+    events = _schemas.CapacityDateEventSchema.validate(
+        _build_capacity_date_events(imputed)
+    )
+    events.to_parquet(snakemake.output.capacity_date_events, index=False)
     plot_powerplant_capacity_buildup(
-        imputed_gdf,
+        imputed,
         snakemake.output.histogram,
         "seaborn:tab20",
         snakemake.wildcards.category,
     )
-    explore(imputed_gdf, snakemake.output.explorer)
+    explore(imputed, snakemake.output.explorer)
     plot_capacity_date_events(
-        events_df=capacity_date_events_df,
-        commissioning_profile_df=commissioning_profile_df,
-        retirement_profile_df=retirement_profile_df,
-        planned_profile_df=planned_profile_df,
-        output_path=snakemake.output.capacity_date_plot,
-        cat=snakemake.wildcards.category,
+        events,
+        profiles,
+        snakemake.output.capacity_date_plot,
+        snakemake.wildcards.category,
     )
 
 

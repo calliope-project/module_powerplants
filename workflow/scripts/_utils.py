@@ -1,6 +1,6 @@
 """General utilities shared across rules."""
 
-from typing import Literal
+from typing import Literal, TypedDict
 
 import geopandas as gpd
 import pandas as pd
@@ -38,18 +38,24 @@ def listify(item) -> list:
     return item if is_list_like(item) else [item]
 
 
-EIA_CAT_MAPPING = {
-    "bioenergy": "biomass and waste",
-    "fossil": "fossil fuels",
-    "geothermal": "geothermal",
+EIA_CAT_MAPPING: dict[str, list[str]] = {
+    "bioenergy": ["biomass and waste"],
+    "fossil": ["fossil fuels"],
+    "geothermal": ["geothermal"],
     "hydropower": ["hydropower", "pumped storage"],
-    "nuclear": "nuclear",
-    "solar": "solar",
-    "wind": "wind",
+    "nuclear": ["nuclear"],
+    "solar": ["solar"],
+    "wind": ["wind"],
 }
-EIA_CAT_MAPPING = {k: listify(v) for k, v in EIA_CAT_MAPPING.items()}
 
-DATE_SOURCE_METADATA = {
+class DateSourceMetadata(TypedDict):
+    """Display metadata for an imputed-date source type."""
+
+    label: str
+    applies_to: set[str]
+
+
+DATE_SOURCE_METADATA: dict[str, DateSourceMetadata] = {
     "observed": {
         "label": "Observed date (from powerplant data)",
         "applies_to": {"start_year", "end_year"},
@@ -59,7 +65,7 @@ DATE_SOURCE_METADATA = {
         "applies_to": {"start_year"},
     },
     "imputed_capacity_profile": {
-        "label": "Start date imputed from historical commissioning-profile",
+        "label": "Start date imputed from historical commissioning profile",
         "applies_to": {"start_year"},
     },
     "imputed_construction_window": {
@@ -83,7 +89,7 @@ DATE_SOURCE_METADATA = {
         "applies_to": {"end_year"},
     },
     "imputed_retirement_capacity_profile": {
-        "label": "End date imputed from retirement-profile",
+        "label": "End date imputed from retirement profile",
         "applies_to": {"end_year"},
     },
     "derived_from_start_year_lifetime_capped_to_retired_status": {
@@ -92,10 +98,6 @@ DATE_SOURCE_METADATA = {
     },
     "derived_from_start_year_lifetime_with_retirement_delay": {
         "label": "End date derived from start date, lifetime, and retirement delay",
-        "applies_to": {"end_year"},
-    },
-    "observed_adjusted_with_retirement_delay": {
-        "label": "Observed end date adjusted with retirement delay",
         "applies_to": {"end_year"},
     },
 }

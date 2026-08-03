@@ -127,6 +127,27 @@ class FuelSchema(DataFrameModel):
     "Fuel consumed."
 
 
+class CapacityDateEventSchema(DataFrameModel):
+    """Annual commissioning and retirement events used by diagnostics."""
+
+    class Config:
+        coerce = True
+        strict = True
+
+    powerplant_id: Series[str]
+    name: Series[str]
+    country_id: Series[str] = Field(str_length={"min_value": 3, "max_value": 3})
+    category: Series[str]
+    technology: Series[str]
+    status: Series[str] = Field(isin={"planned", "operating", "retired"})
+    year: Series[float]
+    event_type: Series[str] = Field(isin={"commissioning", "retirement"})
+    source_type: Series[str] = Field(isin=set(_utils.DATE_SOURCE_METADATA))
+    source_label: Series[str]
+    output_capacity_mw: Series[float] = Field(gt=0)
+    capacity_change_mw: Series[float] = Field(ne=0)
+
+
 # A diverse set of statuses to diminish oversimplification during gap filling.
 PREPARED_STATUS = {
     "announced",
