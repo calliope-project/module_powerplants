@@ -460,8 +460,10 @@ properties:
         additionalProperties: false
         required:
           - scenario
+          - start_year_imputation_method
           - lifetime_years
           - retirement_delay_years
+          - planned_commissioning_year_windows
         properties:
           scenario:
             title: Scenario
