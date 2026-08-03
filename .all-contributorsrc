@@ -49,6 +49,16 @@
       "contributions": [
         "mentoring"
       ]
+    },
+    {
+      "login": "ddahawkins-TUDelft",
+      "name": "ddahawkins-TUDelft",
+      "avatar_url": "https://avatars.githubusercontent.com/u/181712209?v=4",
+      "profile": "https://github.com/ddahawkins-TUDelft",
+      "contributions": [
+        "ideas",
+        "code"
+      ]
     }
   ],
   "contributorsPerLine": 7,
