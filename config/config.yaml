@@ -118,6 +118,7 @@ imputation:
       utility pv: "land"
   time:
     scenario: "construction" # Options: historical->construction->pre_construction->announced
+    start_year_imputation_method: capacity_profile
     lifetime_years:
       # General lifetime assumptions. Adjust as needed!
       bioenergy turbine: 25
@@ -161,3 +162,80 @@ imputation:
       smr reactor: 50
       steam turbine: 5
       utility pv: 2
+    planned_commissioning_year_windows:
+      bioenergy turbine:
+        construction: [1, 3]
+        pre-construction: [2, 5]
+        announced: [4, 8]
+      ccgt:
+        construction: [1, 3]
+        pre-construction: [2, 5]
+        announced: [4, 8]
+      coal turbine:
+        construction: [1, 3]
+        pre-construction: [2, 5]
+        announced: [4, 8]
+      concentrating solar power:
+        construction: [1, 4]
+        pre-construction: [3, 7]
+        announced: [5, 10]
+      high enthalpy geothermal:
+        construction: [2, 5]
+        pre-construction: [3, 7]
+        announced: [5, 10]
+      igcc:
+        construction: [2, 5]
+        pre-construction: [4, 8]
+        announced: [6, 12]
+      low enthalpy geothermal:
+        construction: [1, 4]
+        pre-construction: [3, 6]
+        announced: [4, 9]
+      nuclear reactor:
+        construction: [3, 7]
+        pre-construction: [5, 13]
+        announced: [8, 18]
+      ocgt:
+        construction: [1, 3]
+        pre-construction: [2, 5]
+        announced: [4, 8]
+      offshore:
+        construction: [2, 5]
+        pre-construction: [3, 8]
+        announced: [5, 12]
+      onshore:
+        construction: [1, 3]
+        pre-construction: [2, 6]
+        announced: [3, 10]
+      pumped storage:
+        construction: [3, 8]
+        pre-construction: [5, 12]
+        announced: [8, 18]
+      reciprocating engine:
+        construction: [1, 3]
+        pre-construction: [2, 5]
+        announced: [4, 8]
+      reservoir:
+        construction: [3, 8]
+        pre-construction: [5, 12]
+        announced: [8, 18]
+      rooftop pv:
+        construction: [1, 2]
+        pre-construction: [2, 3]
+        announced: [3, 5]
+      run of river:
+        construction: [2, 6]
+        pre-construction: [4, 10]
+        announced: [6, 15]
+      smr reactor:
+        construction: [2, 6]
+        pre-construction: [4, 10]
+        announced: [7, 15]
+      steam turbine:
+        construction: [1, 3]
+        pre-construction: [2, 5]
+        announced: [4, 8]
+      utility pv:
+        construction: [1, 3]
+        pre-construction: [2, 5]
+        announced: [3, 8]

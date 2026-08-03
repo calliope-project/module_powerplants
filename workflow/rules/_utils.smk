@@ -31,7 +31,7 @@ IMPUTED_CAT_WITHOUT_ADJUSTMENT = {"large_solar"}
 
 
 def additional_config_validation():
-    """Ensures technology mapping and lifetime-related names match."""
+    """Ensure technology mappings and time-imputation settings match."""
     lifetime_set = set(config["imputation"]["time"]["lifetime_years"].keys())
     mismatch = lifetime_set ^ set(
         config["imputation"]["time"]["retirement_delay_years"]
@@ -52,6 +52,25 @@ def additional_config_validation():
     if mismatch:
         raise ValueError(
             f"Technology mapping does not match lifetime technologies for {mismatch}"
+        )
+
+    planned_windows = config["imputation"]["time"]["planned_commissioning_year_windows"]
+    mismatch = tech_map_set ^ set(planned_windows)
+    if mismatch:
+        raise ValueError(
+            "Technology mapping does not match planned commissioning windows "
+            f"for {mismatch}"
+        )
+    reversed_windows = {
+        f"{technology}/{status}": window
+        for technology, status_windows in planned_windows.items()
+        for status, window in status_windows.items()
+        if window[0] > window[1]
+    }
+    if reversed_windows:
+        raise ValueError(
+            "Planned commissioning windows must be ordered [minimum, maximum]: "
+            f"{reversed_windows}"
         )
 
 

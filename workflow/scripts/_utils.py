@@ -49,6 +49,74 @@ EIA_CAT_MAPPING = {
 }
 EIA_CAT_MAPPING = {k: listify(v) for k, v in EIA_CAT_MAPPING.items()}
 
+DATE_SOURCE_METADATA = {
+    "observed": {
+        "label": "Observed date (from powerplant data)",
+        "applies_to": {"start_year", "end_year"},
+    },
+    "derived_from_end_year": {
+        "label": "Start date derived from observed end date",
+        "applies_to": {"start_year"},
+    },
+    "imputed_capacity_profile": {
+        "label": "Start date imputed from historical commissioning-profile",
+        "applies_to": {"start_year"},
+    },
+    "imputed_construction_window": {
+        "label": "Start date imputed within construction window",
+        "applies_to": {"start_year"},
+    },
+    "imputed_pre_construction_window": {
+        "label": "Start date imputed within pre-construction window",
+        "applies_to": {"start_year"},
+    },
+    "imputed_announced_window": {
+        "label": "Start date imputed within announced window",
+        "applies_to": {"start_year"},
+    },
+    "derived_from_imputed_retirement_end_year": {
+        "label": "Start date derived from retirement-profile end date",
+        "applies_to": {"start_year"},
+    },
+    "derived_from_start_year_lifetime": {
+        "label": "End date derived from start date and lifetime",
+        "applies_to": {"end_year"},
+    },
+    "imputed_retirement_capacity_profile": {
+        "label": "End date imputed from retirement-profile",
+        "applies_to": {"end_year"},
+    },
+    "derived_from_start_year_lifetime_capped_to_retired_status": {
+        "label": "End date derived from start date but capped to retired status",
+        "applies_to": {"end_year"},
+    },
+    "derived_from_start_year_lifetime_with_retirement_delay": {
+        "label": "End date derived from start date, lifetime, and retirement delay",
+        "applies_to": {"end_year"},
+    },
+    "observed_adjusted_with_retirement_delay": {
+        "label": "Observed end date adjusted with retirement delay",
+        "applies_to": {"end_year"},
+    },
+}
+
+
+def date_source_types_for(year_column: str) -> set[str]:
+    """Return source types valid for a date column."""
+    return {
+        source_type
+        for source_type, metadata in DATE_SOURCE_METADATA.items()
+        if year_column in metadata["applies_to"]
+    }
+
+
+def date_source_labels() -> dict[str, str]:
+    """Return date-source display labels."""
+    return {
+        source_type: metadata["label"]
+        for source_type, metadata in DATE_SOURCE_METADATA.items()
+    }
+
 
 def get_eia_stats_in_cat_yr(
     stats: pd.DataFrame, year: int, category: str

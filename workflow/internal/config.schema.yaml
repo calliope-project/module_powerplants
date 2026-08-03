@@ -29,6 +29,43 @@ $defs:
       type: integer
       minimum: 1
 
+  planned_commissioning_year_window:
+    type: array
+    description: >
+      Inclusive minimum and maximum commissioning-year offsets relative
+      to the dataset year.
+    minItems: 2
+    maxItems: 2
+    items:
+      type: integer
+      minimum: 1
+
+  planned_commissioning_status_windows:
+    type: object
+    additionalProperties: false
+    required:
+      - construction
+      - pre-construction
+      - announced
+    properties:
+      construction:
+        $ref: "#/$defs/planned_commissioning_year_window"
+      pre-construction:
+        $ref: "#/$defs/planned_commissioning_year_window"
+      announced:
+        $ref: "#/$defs/planned_commissioning_year_window"
+
+  planned_commissioning_technology_windows:
+    title: Planned commissioning year windows
+    description: |
+      Technology- and status-specific year-offset windows used to impute
+      missing commissioning years for planned powerplants. Each window is
+      expressed as [minimum_year_offset, maximum_year_offset] relative to
+      the dataset year (inclusive).
+    type: object
+    additionalProperties:
+      $ref: "#/$defs/planned_commissioning_status_windows"
+
   technology_mapping_base:
     title: Technology Mapping
     description: >
@@ -423,8 +460,10 @@ properties:
         additionalProperties: false
         required:
           - scenario
+          - start_year_imputation_method
           - lifetime_years
           - retirement_delay_years
+          - planned_commissioning_year_windows
         properties:
           scenario:
             title: Scenario
@@ -444,3 +483,16 @@ properties:
             $ref: "#/$defs/year_map"
           retirement_delay_years:
             $ref: "#/$defs/year_map"
+          start_year_imputation_method:
+            title: Start year imputation method
+            description: |
+              Method used to impute missing start years when backfilling from known
+              end years is not possible.
+
+              - 'capacity_profile' assigns missing start years deterministically using
+              capacity-weighted commissioning profiles from annual commissioning statistics.
+            type: string
+            enum:
+              - capacity_profile
+          planned_commissioning_year_windows:
+            $ref: "#/$defs/planned_commissioning_technology_windows"

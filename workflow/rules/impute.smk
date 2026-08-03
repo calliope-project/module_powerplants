@@ -45,6 +45,10 @@ rule impute_location:
 rule impute_time:
     input:
         relocated=rules.impute_location.output.relocated,
+        category_capacity=(
+            "<resources>/automatic/shapes/{shapes}/"
+            "statistics/category_capacity.parquet"
+        ),
     output:
         aged=workflow.pathvars.apply("<powerplants>").format(
             shapes="{shapes}",
@@ -63,10 +67,19 @@ rule impute_time:
             category="Powerplants module",
             subcategory="{category}",
         ),
+        capacity_date_events=(
+            "<resources>/automatic/shapes/{shapes}/impute_time/{category}_capacity_date_events.parquet"
+        ),
+        capacity_date_plot=report(
+            "<results>/{shapes}/powerplants/unadjusted/{category}_capacity_date_events.pdf",
+            caption="../report/impute_time_profile.rst",
+            category="Powerplants module",
+            subcategory="{category}",
+        ),
     log:
         "<logs>/{shapes}/{category}/impute_time.log",
     wildcard_constraints:
-        dataset="|".join(IMPUTED_CAT),
+        category="|".join(IMPUTED_CAT),
     conda:
         "../envs/module.yaml"
     params:
