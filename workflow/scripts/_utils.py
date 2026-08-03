@@ -48,6 +48,7 @@ EIA_CAT_MAPPING: dict[str, list[str]] = {
     "wind": ["wind"],
 }
 
+
 class DateSourceMetadata(TypedDict):
     """Display metadata for an imputed-date source type."""
 
@@ -65,7 +66,7 @@ DATE_SOURCE_METADATA: dict[str, DateSourceMetadata] = {
         "applies_to": {"start_year"},
     },
     "imputed_capacity_profile": {
-        "label": "Start date imputed from historical commissioning profile",
+        "label": "Start date imputed from historical commissioning-profile",
         "applies_to": {"start_year"},
     },
     "imputed_construction_window": {
@@ -89,7 +90,7 @@ DATE_SOURCE_METADATA: dict[str, DateSourceMetadata] = {
         "applies_to": {"end_year"},
     },
     "imputed_retirement_capacity_profile": {
-        "label": "End date imputed from retirement profile",
+        "label": "End date imputed from retirement-profile",
         "applies_to": {"end_year"},
     },
     "derived_from_start_year_lifetime_capped_to_retired_status": {
