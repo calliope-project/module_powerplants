@@ -88,7 +88,7 @@ rule impute_time:
     message:
         "National-level imputation of missing powerplant ages in {wildcards.shapes}-{wildcards.category} dataset."
     script:
-        "../scripts/impute_ages.py"
+        "../scripts/impute_time.py"
 
 
 rule impute_capacity_adjustment:

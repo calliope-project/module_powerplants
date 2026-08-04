@@ -46,13 +46,12 @@ https://conda.anaconda.org/conda-forge/win-64/pydantic-core-2.46.4-py312hdabe01f
 https://conda.anaconda.org/conda-forge/noarch/annotated-types-0.7.0-pyhd8ed1ab_1.conda#2934f256a8acfe48f6ebb4fce6cde29c
 https://conda.anaconda.org/conda-forge/noarch/pydantic-2.13.4-pyhcf101f3_0.conda#729843edafc0899b3348bd3f19525b9d
 https://conda.anaconda.org/conda-forge/noarch/packaging-26.2-pyhc364b38_0.conda#4c06a92e74452cfa53623a81592e8934
-https://conda.anaconda.org/conda-forge/noarch/pandera-base-0.24.0-pyhd8ed1ab_2.conda#e1c50e117a98e39d297d9290132f032b
-https://conda.anaconda.org/conda-forge/noarch/pytz-2026.2-pyhcf101f3_0.conda#03cb60f505ad3ada0a95277af5faeb1a
+https://conda.anaconda.org/conda-forge/noarch/pandera-base-0.32.1-pyhcf101f3_0.conda#c78daae943cb94e6e6b2eab16e16a18f
 https://conda.anaconda.org/conda-forge/noarch/python-tzdata-2026.2-pyhd8ed1ab_0.conda#f6ad7450fc21e00ecc23812baed6d2e4
 https://conda.anaconda.org/conda-forge/noarch/six-1.17.0-pyhe01879c_1.conda#3339e3b65d58accf4ca4fb8748ab16b3
 https://conda.anaconda.org/conda-forge/noarch/python-dateutil-2.9.0.post0-pyhe01879c_2.conda#5b8d21249ff20967101ffa321cab24e8
-https://conda.anaconda.org/conda-forge/win-64/pandas-2.3.0-py312h72972c8_0.conda#e2ab2d8cc52281c9ebe19451936802eb
-https://conda.anaconda.org/conda-forge/noarch/pandera-0.24.0-hd8ed1ab_2.conda#a12a21a89519f0cc224e44da86f5be2c
+https://conda.anaconda.org/conda-forge/win-64/pandas-3.0.5-py312h95189c4_1.conda#2eebd79dac0d5cb03209bebf32c87e0a
+https://conda.anaconda.org/conda-forge/noarch/pandera-0.32.1-ha00cc4c_0.conda#f6b96a51cda3cf9a068fd748c8155ced
 https://conda.anaconda.org/conda-forge/noarch/xyzservices-2026.3.0-pyhd8ed1ab_0.conda#4487b9c371d0161d54b5c7bbd890c0fc
 https://conda.anaconda.org/conda-forge/win-64/sqlite-3.53.3-hdb435a2_0.conda#7a28cb97617f0bd6a650b4b88f1f44cb
 https://conda.anaconda.org/conda-forge/win-64/zstd-1.5.7-h534d264_6.conda#053b84beec00b71ea8ff7a4f84b55207
@@ -122,7 +121,7 @@ https://conda.anaconda.org/conda-forge/noarch/joblib-1.5.3-pyhd8ed1ab_0.conda#61
 https://conda.anaconda.org/conda-forge/win-64/scikit-learn-1.9.0-np2py312hea30aaf_0.conda#0637562978d4231902754645e4c28640
 https://conda.anaconda.org/conda-forge/noarch/networkx-3.6.1-pyhcf101f3_0.conda#a2c1eeadae7a309daed9d62c96012a2b
 https://conda.anaconda.org/conda-forge/noarch/mapclassify-2.10.0-pyhd8ed1ab_1.conda#cc293b4cad9909bf66ca117ea90d4631
-https://conda.anaconda.org/conda-forge/noarch/geopandas-base-1.0.1-pyha770c72_3.conda#e8343d1b635bf09dafdd362d7357f395
+https://conda.anaconda.org/conda-forge/noarch/geopandas-base-1.1.4-pyha770c72_0.conda#6e31007c02f361338281bb78c5b84e7c
 https://conda.anaconda.org/conda-forge/noarch/win_inet_pton-1.1.0-pyh7428d3b_8.conda#46e441ba871f524e2b067929da3051c2
 https://conda.anaconda.org/conda-forge/noarch/pysocks-1.7.1-pyh09c184e_7.conda#e2fd202833c4a981ce8a65974fe4abd1
 https://conda.anaconda.org/conda-forge/noarch/hyperframe-6.1.0-pyhd8ed1ab_0.conda#8e6923fc12f1fe8f8c4e5c9f343256ac
@@ -138,8 +137,8 @@ https://conda.anaconda.org/conda-forge/win-64/markupsafe-3.0.3-py312h05f76fc_1.c
 https://conda.anaconda.org/conda-forge/noarch/jinja2-3.1.6-pyhcf101f3_1.conda#04558c96691bed63104678757beb4f8d
 https://conda.anaconda.org/conda-forge/noarch/branca-0.8.2-pyhd8ed1ab_0.conda#1fcdf88e7a8c296d3df8409bf0690db4
 https://conda.anaconda.org/conda-forge/noarch/folium-0.20.0-pyhd8ed1ab_0.conda#a6997a7dcd6673c0692c61dfeaea14ab
-https://conda.anaconda.org/conda-forge/noarch/geopandas-1.0.1-pyhd8ed1ab_3.conda#1baca589eb35814a392eaad6d152447e
-https://conda.anaconda.org/conda-forge/noarch/pandera-geopandas-0.24.0-hd8ed1ab_2.conda#fb21509f073465506ea994dc4667bf66
+https://conda.anaconda.org/conda-forge/noarch/geopandas-1.1.4-pyhd8ed1ab_0.conda#99d77e0f92f7b0b977f77cfb49c7eaf6
+https://conda.anaconda.org/conda-forge/noarch/pandera-geopandas-0.32.1-h9ad522b_0.conda#b6b27c3f219ce4d01c8ea31d435f263c
 https://conda.anaconda.org/conda-forge/noarch/et_xmlfile-2.0.0-pyhd8ed1ab_1.conda#71bf9646cbfabf3022c8da4b6b4da737
 https://conda.anaconda.org/conda-forge/win-64/openpyxl-3.1.5-py312h83acffa_3.conda#ff342a314798173eaaf2753a22f044fa
 https://conda.anaconda.org/conda-forge/win-64/tornado-6.5.7-py312he06e257_0.conda#1045d29f787812d3fac1fd80a1339710

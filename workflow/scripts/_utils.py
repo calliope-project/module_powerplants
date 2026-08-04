@@ -150,7 +150,7 @@ def get_combined_text_col(
 
     Form: {prefix}col1{sep}col2{sep}...coln{suffix}.
     """
-    return prefix + raw[cols].astype(str).agg(sep.join, axis="columns") + suffix
+    return prefix + raw[cols].fillna("").map(str).agg(sep.join, axis="columns") + suffix
 
 
 def check_single_category(df: pd.DataFrame) -> str:
