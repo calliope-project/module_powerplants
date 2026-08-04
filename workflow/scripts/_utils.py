@@ -81,8 +81,8 @@ DATE_SOURCE_METADATA: dict[str, DateSourceMetadata] = {
         "label": "Start date imputed within announced window",
         "applies_to": {"start_year"},
     },
-    "derived_from_imputed_retirement_end_year": {
-        "label": "Start date derived from retirement-profile end date",
+    "imputed_capacity_profile_retirement_linked": {
+        "label": "Commissioning profile (retirement-linked)",
         "applies_to": {"start_year"},
     },
     "derived_from_start_year_lifetime": {

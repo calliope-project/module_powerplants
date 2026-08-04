@@ -59,8 +59,8 @@ $defs:
     title: Planned commissioning year windows
     description: |
       Technology- and status-specific year-offset windows used to impute
-      missing commissioning years for planned powerplants. Each window is
-      expressed as [minimum_year_offset, maximum_year_offset] relative to
+      missing commissioning years for planned powerplants.
+      Each window is expressed as [minimum_year_offset, maximum_year_offset) relative to
       the dataset year (inclusive).
     type: object
     additionalProperties:
