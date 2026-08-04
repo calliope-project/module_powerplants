@@ -61,6 +61,11 @@ def _initialize_year_source_type(year: pd.Series) -> pd.Series:
     return source_type
 
 
+def _has_no_dates(plants: pd.DataFrame) -> pd.Series:
+    """Return powerplants without an observed start or end year."""
+    return plants[["start_year", "end_year"]].isna().all(axis=1)
+
+
 def _reference_capacity_stock(
     reference_capacity_df: pd.DataFrame,
     country_id: str,
@@ -306,10 +311,10 @@ def _allocate_historical_start_years(
     """Allocate retired and operating starts against one commissioning target."""
     assigned = pd.Series(np.nan, index=plants.index, dtype=float)
 
-    # A retired plant needs room for an end year before the dataset year.
+    # A retired plant needs at least one operating year before its end year.
     retired = plants.loc[plants["status"].eq(RETIRED)]
     if not retired.empty:
-        latest_retired_start_year = dataset_year - 2
+        latest_retired_start_year = dataset_year - 1
         retired_years = _allocate_years_by_target(
             retired, target.loc[target.index <= latest_retired_start_year]
         )
@@ -337,7 +342,7 @@ def _impute_historical_start_years(
     """Impute historical start years from commissioning profiles."""
     result = pd.Series(np.nan, index=plants.index, dtype=float)
     profiles: list[pd.DataFrame] = []
-    missing = plants["start_year"].isna() & plants["status"].isin(HISTORICAL)
+    missing = _has_no_dates(plants) & plants["status"].isin(HISTORICAL)
 
     for (country_id, category), undated in plants.loc[missing].groupby(
         ["country_id", "category"]
@@ -350,9 +355,9 @@ def _impute_historical_start_years(
         ]
 
         operating = undated["status"].eq(OPERATING)
-        retired = undated["status"].eq(RETIRED)
         lifetime = undated["technology"].map(lifetimes)
-        earliest_operating_year = dataset_year - lifetime.loc[operating]
+        earliest_operating_year = dataset_year - lifetime.loc[operating] + 1
+        retired = undated["status"].eq(RETIRED)
 
         stock = _reference_capacity_stock(
             reference_capacity_df, country_id, categories, dataset_year
@@ -369,7 +374,7 @@ def _impute_historical_start_years(
             reference_first if reference_first is not None else dataset_year,
         )
         years = pd.Index(range(int(first_year), dataset_year + 1), name="start_year")
-        last_allocatable_year = dataset_year if operating.any() else dataset_year - 2
+        last_allocatable_year = dataset_year if operating.any() else dataset_year - 1
         allocatable_years = years[years <= last_allocatable_year]
 
         profile = _build_reference_profile(
@@ -433,7 +438,7 @@ def _impute_retired_end_years(
             group & plants["status"].eq(RETIRED) & plants["end_year"].notna()
         ]
         stock = _reference_capacity_stock(
-            reference_capacity_df, country_id, categories, dataset_year - 1
+            reference_capacity_df, country_id, categories, dataset_year
         )
         reference_first = _first_reported_year(stock)
         observed_first = int(dated["end_year"].min()) if not dated.empty else None
@@ -445,14 +450,14 @@ def _impute_retired_end_years(
                 if year is not None
             )
         )
-        years = pd.Index(range(first_year, dataset_year), name="end_year")
+        years = pd.Index(range(first_year, dataset_year + 1), name="end_year")
         profile = _build_reference_profile(
             reference_capacity_df, country_id, categories, years, "retirement"
         )
         # Missing retirements are normally restricted to the period covered by
         # the country's reference series.
         allocatable_years = pd.Index(
-            range(reference_first or first_year, dataset_year), name="end_year"
+            range(reference_first or first_year, dataset_year + 1), name="end_year"
         )
         profile_source = "negative_capacity_change"
 
@@ -506,21 +511,19 @@ def _impute_retired_end_years(
     return end_result, combined
 
 
-def _impute_planned_start_years(
+def _impute_planned_dates(
     plants: pd.DataFrame,
     windows: Mapping[str, Mapping[str, list[int]]],
+    lifetimes: Mapping[str, int],
+    delays: Mapping[str, int],
     dataset_year: int,
-) -> tuple[pd.Series, pd.Series, pd.DataFrame]:
-    """Impute planned powerplant start years using the configured flat windows.
-
-    Only cases with missing dates are imputed.
-    """
-    years_result = pd.Series(np.nan, index=plants.index, dtype=float)
-    source_result = pd.Series(pd.NA, index=plants.index, dtype="object")
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Complete fully undated planned plants using flat windows and lifetimes."""
+    result = plants.copy()
     profiles: list[pd.DataFrame] = []
-    missing = plants["status"].isin(PLANNED) & plants["start_year"].isna()
+    missing = result["status"].isin(PLANNED) & _has_no_dates(result)
 
-    for (country_id, category, technology, status), undated in plants.loc[
+    for (country_id, category, technology, status), undated in result.loc[
         missing
     ].groupby(["country_id", "category", "technology", "status"]):
         # Planned projects follow technology-specific future windows
@@ -532,8 +535,10 @@ def _impute_planned_start_years(
             undated["output_capacity_mw"].sum() / len(years), index=years
         )
         assigned = _allocate_years_by_target(undated, target)
-        years_result.loc[undated.index] = assigned
-        source_result.loc[undated.index] = f"imputed_{status.replace('-', '_')}_window"
+        result.loc[undated.index, "start_year"] = assigned
+        result.loc[undated.index, "start_year_source_type"] = (
+            f"imputed_{status.replace('-', '_')}_window"
+        )
 
         profile = pd.DataFrame(
             {"target_final_mw": target, "observed_mw": 0.0}, index=years
@@ -553,58 +558,113 @@ def _impute_planned_start_years(
             )
         )
 
+    completed = _impute_lifetime_dates(
+        result.loc[missing], lifetimes, delays, dataset_year
+    )
+    result.loc[missing, ["end_year", "end_year_source_type"]] = completed[
+        ["end_year", "end_year_source_type"]
+    ]
     combined = pd.concat(profiles, ignore_index=True) if profiles else empty_profiles()
-    return years_result, source_result, combined
+    return result, combined
 
 
-def _impute_start_years(
+def _impute_lifetime_dates(
+    plants: pd.DataFrame,
+    lifetimes: Mapping[str, int],
+    delays: Mapping[str, int],
+    dataset_year: int,
+) -> pd.DataFrame:
+    """Complete missing date counterparts using configured lifetimes."""
+    result = plants.copy()
+    lifetime = result["technology"].map(lifetimes)
+
+    derived_start = result["end_year"] - lifetime
+    start = result["start_year"].isna() & derived_start.notna()
+    result.loc[start, "start_year"] = derived_start.loc[start]
+    result.loc[start, "start_year_source_type"] = "derived_from_end_year"
+
+    expected_end = result["start_year"] + lifetime
+    derived = result["end_year"].isna() & expected_end.notna()
+    result.loc[derived, "end_year"] = expected_end.loc[derived]
+    result.loc[derived, "end_year_source_type"] = "derived_from_start_year_lifetime"
+
+    # Only derived dates may be adjusted: known start/end years remain sacred.
+    # A plant marked retired must be offline by the start of the dataset year.
+    retired_cap = (
+        derived & result["status"].eq(RETIRED) & result["end_year"].gt(dataset_year)
+    )
+    result.loc[retired_cap, "end_year"] = dataset_year
+    result.loc[retired_cap, "end_year_source_type"] = (
+        "derived_from_start_year_lifetime_capped_to_retired_status"
+    )
+
+    # An operating plant that outlived its assumed lifetime receives the
+    # configured extension, with at least one year beyond the dataset year.
+    delayed = (
+        derived & result["status"].eq(OPERATING) & result["end_year"].le(dataset_year)
+    )
+    result.loc[delayed, "end_year"] = (
+        result.loc[delayed, "end_year"] + result.loc[delayed, "technology"].map(delays)
+    ).clip(lower=dataset_year + 1)
+    result.loc[delayed, "end_year_source_type"] = (
+        "derived_from_start_year_lifetime_with_retirement_delay"
+    )
+    return result
+
+
+def _impute_capacity_profile_dates(
     plants: pd.DataFrame,
     reference_capacity_df: pd.DataFrame,
     lifetimes: Mapping[str, int],
-    windows: Mapping[str, Mapping[str, list[int]]],
-    method: str,
+    delays: Mapping[str, int],
     reference_category_mapping: Mapping[str, list[str]],
     dataset_year: int,
-) -> tuple[pd.Series, pd.Series, pd.DataFrame]:
-    """Impute missing start years and record their sources."""
-    start_year = plants["start_year"].copy()
-    source_type = _initialize_year_source_type(start_year)
-    lifetime = plants["technology"].map(lifetimes)
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Complete fully undated historical plants using capacity profiles."""
+    result = plants.copy()
+    undated = _has_no_dates(result) & result["status"].isin(HISTORICAL)
+    retired = undated & result["status"].eq(RETIRED)
 
-    # A known end year and configured lifetime have the strongest priority.
-    # So we apply it before any profile-based allocation.
-    direct = start_year.isna() & plants["end_year"].notna()
-    start_year.loc[direct] = plants.loc[direct, "end_year"] - lifetime.loc[direct]
-    source_type.loc[direct] = "derived_from_end_year"
-
-    # Planned projects are imputed independently across their configured windows.
-    working = plants.copy()
-    working["start_year"] = start_year
-    planned_year, planned_source, planned_profiles = _impute_planned_start_years(
-        working, windows, dataset_year
-    )
-    planned = start_year.isna() & planned_year.notna()
-    start_year.loc[planned] = planned_year.loc[planned]
-    source_type.loc[planned] = planned_source.loc[planned]
-
-    # Apply the configured historical strategy only after direct and planned
-    # derivations have filled everything they can.
-    working["start_year"] = start_year
-    strategies = {"capacity_profile": _impute_historical_start_years}
-    historical_year, historical_profiles = strategies[method](
-        working,
+    start_year, commissioning_profiles = _impute_historical_start_years(
+        result,
         reference_capacity_df,
         lifetimes,
         reference_category_mapping,
         dataset_year,
     )
-    historical = start_year.isna() & historical_year.notna()
-    start_year.loc[historical] = historical_year.loc[historical]
-    source_type.loc[historical] = f"imputed_{method}"
+    start_imputed = undated & start_year.notna()
+    result.loc[start_imputed, "start_year"] = start_year.loc[start_imputed]
+    result.loc[start_imputed, "start_year_source_type"] = "imputed_capacity_profile"
+    result.loc[retired & start_year.notna(), "start_year_source_type"] = (
+        "imputed_capacity_profile_retirement_linked"
+    )
+
+    # Profile-imputed commissioning years set the earliest feasible retirement year.
+    end_year, retirement_profiles = _impute_retired_end_years(
+        result, retired, reference_capacity_df, reference_category_mapping, dataset_year
+    )
+    end_imputed = retired & end_year.notna()
+    result.loc[end_imputed, "end_year"] = end_year.loc[end_imputed]
+    result.loc[end_imputed, "end_year_source_type"] = (
+        "imputed_retirement_capacity_profile"
+    )
+
+    # The selected method owns completion of its cohort. Lifetime assumptions
+    # complete only counterparts which the capacity profiles left unresolved.
+    completed = _impute_lifetime_dates(
+        result.loc[undated], lifetimes, delays, dataset_year
+    )
+    date_columns = [
+        "start_year",
+        "end_year",
+        "start_year_source_type",
+        "end_year_source_type",
+    ]
+    result.loc[undated, date_columns] = completed[date_columns]
 
     profile_parts = [
         profile
-        for profile in (historical_profiles, planned_profiles)
+        for profile in (commissioning_profiles, retirement_profiles)
         if not profile.empty
     ]
     profiles = (
@@ -612,43 +672,11 @@ def _impute_start_years(
         if profile_parts
         else empty_profiles()
     )
-    return start_year, source_type, profiles
-
-
-def _impute_end_years(
-    plants: pd.DataFrame,
-    lifetimes: Mapping[str, int],
-    delays: Mapping[str, int],
-    dataset_year: int,
-) -> tuple[pd.Series, pd.Series]:
-    """Derive missing end years from lifetimes and record their sources."""
-    end_year = plants["end_year"].copy()
-    source_type = _initialize_year_source_type(end_year)
-    expected_end = plants["start_year"] + plants["technology"].map(lifetimes)
-    derived = end_year.isna() & expected_end.notna()
-    end_year.loc[derived] = expected_end.loc[derived]
-    source_type.loc[derived] = "derived_from_start_year_lifetime"
-
-    # Only derived dates may be adjusted: known start/end years remain sacred.
-    # A lifetime-derived retirement for a retired plant must precede the dataset.
-    retired_cap = derived & plants["status"].eq(RETIRED) & end_year.ge(dataset_year)
-    end_year.loc[retired_cap] = dataset_year - 1
-    source_type.loc[retired_cap] = (
-        "derived_from_start_year_lifetime_capped_to_retired_status"
-    )
-
-    # An operating plant that outlived its assumed lifetime receives the
-    # configured extension, with at least one year beyond the dataset year.
-    delayed = derived & plants["status"].eq(OPERATING) & end_year.le(dataset_year)
-    end_year.loc[delayed] = (
-        end_year.loc[delayed] + plants.loc[delayed, "technology"].map(delays)
-    ).clip(lower=dataset_year + 1)
-    source_type.loc[delayed] = "derived_from_start_year_lifetime_with_retirement_delay"
-    return end_year, source_type
+    return result, profiles
 
 
 def _adjust_scenario_status_for_year(plants: pd.DataFrame, year: int) -> pd.Series:
-    """Adjust powerplant status to the given year without altering oberved dates."""
+    """Adjust powerplant status to the given year without altering observed dates."""
     status = plants["status"].copy()
 
     # Observed retirement years are the strongest status signal.
@@ -702,8 +730,11 @@ def impute_dates(
         result["end_year_source_type"] = pd.Series(dtype="object")
         return result, empty_profiles()
 
-    status = _adjust_scenario_status_for_year(plants, dataset_year)
-    scenario_plants = plants.assign(status=status)
+    scenario_plants = plants.assign(
+        status=_adjust_scenario_status_for_year(plants, dataset_year),
+        start_year_source_type=_initialize_year_source_type(plants["start_year"]),
+        end_year_source_type=_initialize_year_source_type(plants["end_year"]),
+    )
     result = scenario_plants.loc[
         scenario_plants["status"].isin(SCENARIO_MAP[imputation["scenario"]])
     ].copy()
@@ -714,48 +745,38 @@ def impute_dates(
         return result, empty_profiles()
 
     lifetimes = imputation["lifetime_years"]
-    retirement_linked = (
-        result["status"].eq(RETIRED)
-        & result["start_year"].isna()
-        & result["end_year"].isna()
-    )
+    delays = imputation["retirement_delay_years"]
 
-    result["start_year"], start_source, profiles = _impute_start_years(
+    # Observed dates are immutable. Complete only their missing counterparts
+    # before applying imputation methods to plants with no known dates.
+    result = _impute_lifetime_dates(result, lifetimes, delays, dataset_year)
+
+    result, planned_profiles = _impute_planned_dates(
         result,
-        reference_capacity_df,
-        lifetimes,
         imputation["planned_commissioning_year_windows"],
-        imputation["start_year_imputation_method"],
-        reference_category_mapping,
+        lifetimes,
+        delays,
         dataset_year,
     )
-    start_source.loc[retirement_linked] = "imputed_capacity_profile_retirement_linked"
 
-    # The commissioning-profile start sets the earliest feasible retirement year.
-    retired_end, retirement_profiles = _impute_retired_end_years(
-        result,
-        retirement_linked,
-        reference_capacity_df,
-        reference_category_mapping,
-        dataset_year,
-    )
-    retirement_end_imputed = retired_end.notna()
-    result.loc[retirement_end_imputed, "end_year"] = retired_end.loc[
-        retirement_end_imputed
-    ]
-
-    result["end_year"], end_source = _impute_end_years(
-        result, lifetimes, imputation["retirement_delay_years"], dataset_year
-    )
-    end_source.loc[retirement_end_imputed] = "imputed_retirement_capacity_profile"
+    match imputation["method"]:
+        case "capacity_profile":
+            result, method_profiles = _impute_capacity_profile_dates(
+                result,
+                reference_capacity_df,
+                lifetimes,
+                delays,
+                reference_category_mapping,
+                dataset_year,
+            )
+        case method:
+            raise ValueError(f"Unknown time imputation method: {method}")
 
     # Complete dates determine the temporal status. Preserve date
     # provenance alongside the final plant output for diagnostics.
     result["status"] = _final_status(result, dataset_year)
-    result["start_year_source_type"] = start_source
-    result["end_year_source_type"] = end_source
     profile_parts = [
-        profile for profile in (profiles, retirement_profiles) if not profile.empty
+        profile for profile in (planned_profiles, method_profiles) if not profile.empty
     ]
     profiles = (
         pd.concat(profile_parts, ignore_index=True).reindex(columns=PROFILE_COLUMNS)
@@ -1008,6 +1029,17 @@ def plot_capacity_date_events(
     plt.close(fig)
 
 
+def _capacity_profile_diagnostics(
+    imputed: pd.DataFrame, profiles: pd.DataFrame, output_path: str, category: str
+) -> pd.DataFrame:
+    """Build capacity-profile diagnostics and render their plot."""
+    events = _schemas.CapacityDateEventSchema.validate(
+        _build_capacity_date_events(imputed)
+    )
+    plot_capacity_date_events(events, profiles, output_path, category)
+    return events
+
+
 def explore(
     imputed: gpd.GeoDataFrame, output_path: str, colormap: str = "tab20"
 ) -> None:
@@ -1101,10 +1133,6 @@ def main() -> None:
     )
     imputed.to_parquet(snakemake.output.aged)
 
-    events = _schemas.CapacityDateEventSchema.validate(
-        _build_capacity_date_events(imputed)
-    )
-    events.to_parquet(snakemake.output.capacity_date_events, index=False)
     plot_powerplant_capacity_buildup(
         imputed,
         snakemake.output.histogram,
@@ -1112,12 +1140,18 @@ def main() -> None:
         snakemake.wildcards.category,
     )
     explore(imputed, snakemake.output.explorer)
-    plot_capacity_date_events(
-        events,
-        profiles,
-        snakemake.output.capacity_date_plot,
-        snakemake.wildcards.category,
-    )
+
+    match snakemake.params.imputation["method"]:
+        case "capacity_profile":
+            diagnostics = _capacity_profile_diagnostics(
+                imputed,
+                profiles,
+                snakemake.output.capacity_date_plot,
+                snakemake.wildcards.category,
+            )
+        case method:
+            raise ValueError(f"Unknown time-imputation method: {method}")
+    diagnostics.to_parquet(snakemake.output.capacity_date_events, index=False)
 
 
 if __name__ == "__main__":

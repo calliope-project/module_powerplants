@@ -4,8 +4,9 @@
 from typing import Literal
 
 import _utils
+import pandas as pd
 import pandera.pandas as pa
-from pandera.pandas import DataFrameModel, Field, check
+from pandera.pandas import DataFrameModel, Field, check, dataframe_check
 from pandera.typing.geopandas import GeoSeries
 from pandera.typing.pandas import Index, Series
 from shapely.geometry import Point
@@ -114,6 +115,12 @@ class PlantSchema(DataFrameModel):
     @check("geometry", element_wise=True)
     def geom_not_empty(cls, geom):
         return (geom is not None) and (not geom.is_empty) and geom.is_valid
+
+    @dataframe_check
+    def end_after_start(cls, plants: pd.DataFrame):
+        """Require ordered dates wherever both years are known."""
+        known_dates = plants[["start_year", "end_year"]].notna().all(axis="columns")
+        return ~known_dates | plants["end_year"].gt(plants["start_year"])
 
 
 class FuelSchema(DataFrameModel):

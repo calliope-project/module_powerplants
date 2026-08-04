@@ -460,7 +460,7 @@ properties:
         additionalProperties: false
         required:
           - scenario
-          - start_year_imputation_method
+          - method
           - lifetime_years
           - retirement_delay_years
           - planned_commissioning_year_windows
@@ -483,14 +483,14 @@ properties:
             $ref: "#/$defs/year_map"
           retirement_delay_years:
             $ref: "#/$defs/year_map"
-          start_year_imputation_method:
-            title: Start year imputation method
+          method:
+            title: Time imputation method
             description: |
-              Method used to impute missing start years when backfilling from known
-              end years is not possible.
+              Method used to complete powerplants for which neither a start nor end
+              year is known.
 
-              - 'capacity_profile' assigns missing start years deterministically using
-              capacity-weighted commissioning profiles from annual commissioning statistics.
+              - 'capacity_profile' assigns dates deterministically using capacity-weighted
+              commissioning and retirement profiles from annual capacity statistics.
             type: string
             enum:
               - capacity_profile

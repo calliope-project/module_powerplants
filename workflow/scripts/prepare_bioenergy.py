@@ -63,6 +63,7 @@ def main():
         },
         crs=crs,
     ).reset_index(drop=True)
+    bioenergy_df = _utils.filter_noncontributing_powerplants(bioenergy_df)
     schema = _schemas.build_schema(technology_mapping, "prepare")
     schema.validate(bioenergy_df).to_parquet(snakemake.output.plants)
 

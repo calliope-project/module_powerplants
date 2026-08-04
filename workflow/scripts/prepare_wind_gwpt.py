@@ -55,6 +55,7 @@ def prepare_gem_gwpt(
         },
         crs=crs,
     )
+    wind_df = _utils.filter_noncontributing_powerplants(wind_df)
     schema = _schemas.build_schema(tech_mapping, "prepare")
     return schema.validate(wind_df)
 

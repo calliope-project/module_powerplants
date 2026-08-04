@@ -204,6 +204,14 @@ def ensure_positive_capacity(df: pd.DataFrame) -> pd.DataFrame:
     return df[df["output_capacity_mw"] > 0].copy()
 
 
+def filter_noncontributing_powerplants(df: pd.DataFrame) -> pd.DataFrame:
+    """Remove source records with no positive capacity or operating duration."""
+    filtered = ensure_positive_capacity(df)
+    known_dates = filtered[["start_year", "end_year"]].notna().all(axis="columns")
+    zero_duration = known_dates & filtered["start_year"].eq(filtered["end_year"])
+    return filtered.loc[~zero_duration].copy()
+
+
 def get_adjusted_capacity(
     operating_plants: pd.DataFrame, expected_capacity: pd.Series
 ) -> pd.Series:
