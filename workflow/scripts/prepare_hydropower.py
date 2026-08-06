@@ -58,6 +58,7 @@ def main():
         },
         crs=crs,
     )
+    hydro_df = _utils.filter_noncontributing_powerplants(hydro_df)
     schema = _schemas.build_schema(technology_mapping, "prepare")
     schema.validate(hydro_df).to_parquet(snakemake.output.output_path)
 

@@ -1,6 +1,6 @@
 """General utilities shared across rules."""
 
-from typing import Literal
+from typing import Literal, TypedDict
 
 import geopandas as gpd
 import pandas as pd
@@ -38,18 +38,25 @@ def listify(item) -> list:
     return item if is_list_like(item) else [item]
 
 
-EIA_CAT_MAPPING = {
-    "bioenergy": "biomass and waste",
-    "fossil": "fossil fuels",
-    "geothermal": "geothermal",
+EIA_CAT_MAPPING: dict[str, list[str]] = {
+    "bioenergy": ["biomass and waste"],
+    "fossil": ["fossil fuels"],
+    "geothermal": ["geothermal"],
     "hydropower": ["hydropower", "pumped storage"],
-    "nuclear": "nuclear",
-    "solar": "solar",
-    "wind": "wind",
+    "nuclear": ["nuclear"],
+    "solar": ["solar"],
+    "wind": ["wind"],
 }
-EIA_CAT_MAPPING = {k: listify(v) for k, v in EIA_CAT_MAPPING.items()}
 
-DATE_SOURCE_METADATA = {
+
+class DateSourceMetadata(TypedDict):
+    """Display metadata for an imputed-date source type."""
+
+    label: str
+    applies_to: set[str]
+
+
+DATE_SOURCE_METADATA: dict[str, DateSourceMetadata] = {
     "observed": {
         "label": "Observed date (from powerplant data)",
         "applies_to": {"start_year", "end_year"},
@@ -74,8 +81,8 @@ DATE_SOURCE_METADATA = {
         "label": "Start date imputed within announced window",
         "applies_to": {"start_year"},
     },
-    "derived_from_imputed_retirement_end_year": {
-        "label": "Start date derived from retirement-profile end date",
+    "imputed_capacity_profile_retirement_linked": {
+        "label": "Commissioning profile (retirement-linked)",
         "applies_to": {"start_year"},
     },
     "derived_from_start_year_lifetime": {
@@ -92,10 +99,6 @@ DATE_SOURCE_METADATA = {
     },
     "derived_from_start_year_lifetime_with_retirement_delay": {
         "label": "End date derived from start date, lifetime, and retirement delay",
-        "applies_to": {"end_year"},
-    },
-    "observed_adjusted_with_retirement_delay": {
-        "label": "Observed end date adjusted with retirement delay",
         "applies_to": {"end_year"},
     },
 }
@@ -147,7 +150,7 @@ def get_combined_text_col(
 
     Form: {prefix}col1{sep}col2{sep}...coln{suffix}.
     """
-    return prefix + raw[cols].astype(str).agg(sep.join, axis="columns") + suffix
+    return prefix + raw[cols].fillna("").map(str).agg(sep.join, axis="columns") + suffix
 
 
 def check_single_category(df: pd.DataFrame) -> str:
@@ -199,6 +202,14 @@ def filter_years(
 def ensure_positive_capacity(df: pd.DataFrame) -> pd.DataFrame:
     """Remove rows with non-positive capacity."""
     return df[df["output_capacity_mw"] > 0].copy()
+
+
+def filter_noncontributing_powerplants(df: pd.DataFrame) -> pd.DataFrame:
+    """Remove source records with no positive capacity or operating duration."""
+    filtered = ensure_positive_capacity(df)
+    known_dates = filtered[["start_year", "end_year"]].notna().all(axis="columns")
+    zero_duration = known_dates & filtered["start_year"].eq(filtered["end_year"])
+    return filtered.loc[~zero_duration].copy()
 
 
 def get_adjusted_capacity(

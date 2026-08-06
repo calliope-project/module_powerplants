@@ -111,7 +111,7 @@ def prepare_gem_gcpt(
         },
         crs=crs,
     ).reset_index(drop=True)
-    coal_df = _utils.ensure_positive_capacity(coal_df)
+    coal_df = _utils.filter_noncontributing_powerplants(coal_df)
     schema = _schemas.build_schema(technology_mapping, "prepare")
     return schema.validate(coal_df), _schemas.FuelSchema.validate(fuels_df)
 
@@ -156,7 +156,7 @@ def prepare_gem_gogpt(
         },
         crs=crs,
     ).reset_index(drop=True)
-    oil_gas_df = _utils.ensure_positive_capacity(oil_gas_df)
+    oil_gas_df = _utils.filter_noncontributing_powerplants(oil_gas_df)
     schema = _schemas.build_schema(technology_mapping, "prepare")
     return schema.validate(oil_gas_df), _schemas.FuelSchema.validate(fuels_df)
 

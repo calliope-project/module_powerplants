@@ -8,10 +8,10 @@ import sys
 from typing import TYPE_CHECKING, Any
 
 import _schemas
+import _utils
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-from _utils import get_point_col
 
 if TYPE_CHECKING:
     snakemake: Any
@@ -68,10 +68,11 @@ def prepare_wemi(wemi_path: str, tech_map: dict, crs: str) -> gpd.GeoDataFrame:
             "start_year": start_year,
             "end_year": np.nan,
             "status": raw_df["Status"].replace(STATUS_MAPPING),
-            "geometry": get_point_col(raw_df, "Longitude", "Latitude", crs=crs),
+            "geometry": _utils.get_point_col(raw_df, "Longitude", "Latitude", crs=crs),
         },
         crs=crs,
     )
+    processed_df = _utils.filter_noncontributing_powerplants(processed_df)
     schema = _schemas.build_schema(tech_map, "prepare")
     return schema.validate(processed_df)
 

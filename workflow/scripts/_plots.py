@@ -12,6 +12,7 @@ from matplotlib import pyplot as plt
 from matplotlib import ticker as mticker
 from matplotlib.axes import Axes
 from matplotlib.patches import Patch
+from matplotlib.typing import ColorType
 
 
 def draw_empty(ax: Axes, title: str = "", message="No data available"):
@@ -248,7 +249,7 @@ def get_colour_dict(
     colormap: str,
     *,
     value_range: tuple[float, float] = (0.0, 1.0),
-) -> dict[str, str]:
+) -> dict[str, ColorType]:
     """Return deterministic colours for a collection of source types."""
     sorted_sources = sorted(sources)
 

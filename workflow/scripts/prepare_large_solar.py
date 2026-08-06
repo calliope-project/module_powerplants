@@ -155,6 +155,7 @@ def prepare_solar_utility_pv(
     utility_pv = pd.concat([filled_tz_df, gem_mismatch_df], ignore_index=True)
     # Convert to points to make further processing easier.
     utility_pv["geometry"] = utility_pv["geometry"].representative_point()
+    utility_pv = _utils.filter_noncontributing_powerplants(utility_pv)
     schema = _schemas.build_schema({"utility_pv": tech_name}, "prepare")
     return schema.validate(utility_pv)
 
@@ -185,6 +186,7 @@ def prepare_solar_csp(
             "geometry": _utils.get_point_col(raw_df, "longitude", "latitude"),
         }
     ).reset_index(drop=True)
+    csp_df = _utils.filter_noncontributing_powerplants(csp_df)
     schema = _schemas.build_schema({"csp": tech_name}, "prepare")
     return schema.validate(csp_df)
 

@@ -43,6 +43,7 @@ def main(
         },
         crs=crs,
     ).reset_index(drop=True)
+    nuclear_df = _utils.filter_noncontributing_powerplants(nuclear_df)
     schema = _schemas.build_schema(technology_mapping, "prepare")
     schema.validate(nuclear_df).to_parquet(output_plants_path)
 
