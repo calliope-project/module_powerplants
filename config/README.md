@@ -20,7 +20,13 @@ Adapt this to your [region of interest](https://epsg.io/) to get accurate area e
 - `fuel_mapping`: optional overrides for combustion fuel names.
 - `imputation`:
     - `location`: controls shape overlaps and technology-to-`shape_class` handling.
-    - `time`: controls future installations scenarios, technology lifetimes, and retirement delays.
+    - `time`: controls temporal filtering and date imputation:
+        * `scenario`: determines which historical and planned project statuses are retained.
+        * `method`: selects the method used to impute fully undated historical powerplants. The `capacity_profile` method uses annual national capacity statistics to construct commissioning and retirement profiles.
+        * `lifetime_years`: technology-specific lifetime assumptions used to derive a missing start or end year when its counterpart is known.
+        * `retirement_delay_years`: extends lifetime-derived retirement dates for plants that remain operational beyond their assumed lifetime.
+        * `planned_commissioning_year_windows`: technology- and status-specific future commissioning windows used to assign commissioning years to fully undated planned projects.
+
 
 This data module is part of the [Modelblocks](https://www.modelblocks.org/) project.
 Please consult the [Modelblocks documentation](https://modelblocks.readthedocs.io/) for more details.

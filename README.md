@@ -38,16 +38,24 @@ Data processing steps:
   <img src="./figures/powerplant_location_algorithm.svg" width="80%">
 </p>
 
-4. Powerplant start and end dates are imputed per category/technology using the configuration.
-    - `lifetime_years` determines overall technology lifetime.
-    - `retirement_delay_years` determines the remaining years of powerplants currently operating beyond their expected lifetime.
+4. Powerplant start and end dates are completed using observed dates, technology lifetime assumptions, historical capacity profiles, and planned-project commissioning windows.
 
-<p align="center">
-  <img src="./figures/fossil_histogram_MEX.png" width="60%">
-</p>
+   * Observed `start_year` and `end_year` values are preserved.
+   * If either the start or end year is known, the missing counterpart is derived using the configured `lifetime_years`.
+   * For historical powerplants with neither date available, the `capacity_profile` method distributes commissioning and retirement capacity over time using annual national capacity statistics as a reference.
+   * For planned powerplants with neither date available, commissioning years are distributed within technology- and status-specific `planned_commissioning_year_windows`.
+   * `retirement_delay_years` extends lifetime-derived retirement dates for plants that are still operating beyond their expected lifetime.
+   * The `scenario` setting determines which historical and planned powerplants are retained.
 
 > [!NOTE]
-> Powerplant start/end dates are only imputed if they are not provided in the original dataset.
+> Observed commissioning and retirement years are never overwritten. The output records the source of each start and end year so that observed, derived, and imputed dates can be distinguished.
+
+For the `capacity_profile` method, annual changes in national EIA capacity stocks are used as a proxy for commissioning and retirement activity. Positive capacity changes inform historical commissioning profiles, while negative changes inform retirement profiles. Capacity associated with already dated powerplants is accounted for before undated powerplants are allocated to the remaining profile. If no suitable capacity changes are available, the method falls back to an alternative or uniform temporal profile.
+
+<p align="center">
+  <img src="./figures/impute_time_fossil_IRL.png" width="80%">
+</p>
+
 
 5. Optionally, powerplant capacities are adjusted evenly per category and country to match EIA statistics.
 
